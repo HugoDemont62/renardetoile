@@ -9,6 +9,10 @@ export class Starship {
   private camera?: PerspectiveCamera
   private cameraOffset = new Vector3(0, 2, 6)
 
+  // vitesse latérale / verticale (unit/s)
+  private lateralSpeed = 6
+  private verticalSpeed = 4
+
   constructor (world: World, speed: number) {
     this.speed = speed
 
@@ -34,13 +38,23 @@ export class Starship {
     this.updateCamera()
   }
 
-  update (deltaTime: number) {
+  // maintenant accepte un Vector3 input: x=strafe (-1..1), y=lift, z=throttle (-1..1)
+  update (deltaTime: number, input?: Vector3) {
     if (this.destroyed) return
 
-    // avancer vers -z
     const t = this.body.translation()
-    const newPos = {x: t.x, y: t.y, z: t.z - this.speed * deltaTime}
-    this.body.setTranslation(newPos, true)
+
+    // forward base
+    const throttleFactor = 1 + (input?.z ?? 0) * 0.5 // throttle modifie la vitesse avant
+    const forward = this.speed * throttleFactor * deltaTime
+    const newX = t.x + (input?.x ?? 0) * this.lateralSpeed * deltaTime
+    let newY = t.y + (input?.y ?? 0) * this.verticalSpeed * deltaTime
+    const newZ = t.z - forward // avancer vers -z comme avant
+
+    // limiter hauteur si besoin
+    if (newY < 0) newY = 0
+
+    this.body.setTranslation({ x: newX, y: newY, z: newZ }, true)
 
     this.syncMeshWithBody()
     this.updateCamera()
@@ -70,7 +84,11 @@ export class Starship {
   destroy (world: World) {
     if (this.destroyed) return
     this.destroyed = true
-    try { world.removeRigidBody(this.body) } catch {}
+    try {
+      world.removeRigidBody(this.body)
+    } catch (e) {
+      console.warn('removeRigidBody failed', e)
+    }
     if (this.mesh.parent) this.mesh.parent.remove(this.mesh)
   }
 }

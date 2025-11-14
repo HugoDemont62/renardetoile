@@ -1,14 +1,9 @@
-import {
-  Box3,
-  PerspectiveCamera,
-  Scene as ThreeScene,
-  Vector2,
-  Vector3
-} from 'three'
+import { Box3, PerspectiveCamera, Scene as ThreeScene, Vector2, Vector3 } from 'three'
 import { Engine } from './Engine'
 import { World } from '@dimforge/rapier3d'
 import { Starship } from '../Class/Starship'
 import { Obstacle } from '../Class/Obstacle'
+import { Controls } from './Controls' // ajout
 
 export class Scene extends ThreeScene {
   engine: Engine
@@ -17,6 +12,9 @@ export class Scene extends ThreeScene {
   world: World
   starship?: Starship
   obstacles: Obstacle[] = []
+  controls: Controls
+
+  private canvasFocusHandler?: () => void
 
   constructor (engine: Engine) {
     super()
@@ -28,6 +26,9 @@ export class Scene extends ThreeScene {
 
     // créer le monde physique (gravité optionnelle)
     this.world = new World({x: 0.0, y: 0.0, z: 0.0})
+
+    // controls
+    this.controls = new Controls()
 
     // starship
     this.starship = new Starship(this.world, 10) // vitesse 10 unités/s
@@ -55,12 +56,13 @@ export class Scene extends ThreeScene {
   render () {
     // step physique
     const delta = this.engine.clock.getDelta()
-    // Rapier step (sans integrateur supplémentaire)
     this.world.step()
 
-    // mise à jour du starship
+    // lire l'input et le passer au starship
+    const input = this.controls.getInput()
+
     if (this.starship && !this.starship.destroyed) {
-      this.starship.update(delta)
+      this.starship.update(delta, input) // <-- input utilisé ici
       // collision simple AABB entre mesh threejs
       const shipBox = new Box3().setFromObject(this.starship.mesh)
       for (const obs of this.obstacles) {
@@ -75,5 +77,13 @@ export class Scene extends ThreeScene {
 
     // rendu
     this.engine.renderer.render(this, this.camera)
+  }
+
+  // appeler quand tu détruis la scène pour nettoyer les listeners
+  dispose () {
+    this.controls.dispose()
+    if (this.canvasFocusHandler) {
+      this.engine.renderer.domElement.removeEventListener('click', this.canvasFocusHandler)
+    }
   }
 }

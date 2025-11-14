@@ -7,7 +7,7 @@ export class Obstacle {
 
   constructor (world: World, position: Vector3, size: Vector3) {
     const geom = new BoxGeometry(size.x, size.y, size.z)
-    const mat = new MeshBasicMaterial({color: 0x884422})
+    const mat = new MeshBasicMaterial({color: 0x808080})
     this.mesh = new Mesh(geom, mat)
     this.mesh.position.copy(position)
     this.mesh.name = 'Obstacle'
