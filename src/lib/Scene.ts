@@ -1,30 +1,48 @@
-import { BoxGeometry, Mesh, MeshBasicMaterial, PerspectiveCamera, Scene as ThreeScene, Vector2 } from 'three'
+import {
+  Box3,
+  PerspectiveCamera,
+  Scene as ThreeScene,
+  Vector2,
+  Vector3
+} from 'three'
 import { Engine } from './Engine'
+import { World } from '@dimforge/rapier3d'
+import { Starship } from '../Class/Starship'
+import { Obstacle } from '../Class/Obstacle'
 
 export class Scene extends ThreeScene {
   engine: Engine
   camera: PerspectiveCamera
-  cube: Mesh
+
+  world: World
+  starship?: Starship
+  obstacles: Obstacle[] = []
 
   constructor (engine: Engine) {
     super()
     this.engine = engine
 
-    this.camera = new PerspectiveCamera()
-    this.camera.position.set(0, 0, 5)
+    this.camera = new PerspectiveCamera(60, 1, 0.1, 1000)
+    this.camera.position.set(0, 2, 6)
     this.camera.lookAt(0, 0, 0)
 
-    this.cube = this.createCube()
-    this.add(this.cube)
-  }
+    // créer le monde physique (gravité optionnelle)
+    this.world = new World({x: 0.0, y: 0.0, z: 0.0})
 
-  createCube (): Mesh {
-    const geom = new BoxGeometry(1, 1, 1)
-    const mat = new MeshBasicMaterial({color: 0x0077ff})
-    const mesh = new Mesh(geom, mat)
-    mesh.position.set(0, 0, 0)
-    mesh.name = 'CenterCube'
-    return mesh
+    // starship
+    this.starship = new Starship(this.world, 10) // vitesse 10 unités/s
+    this.add(this.starship.mesh)
+    this.starship.attachCamera(this.camera, new Vector3(0, 2, 8))
+
+    // créer quelques obstacles (tours) devant le vaisseau
+    for (let i = 1; i <= 6; i++) {
+      const x = (Math.random() - 0.5) * 10
+      const z = -i * 15
+      const height = 6 + Math.random() * 10
+      const obs = new Obstacle(this.world, new Vector3(x, height / 2, z), new Vector3(3, height, 3))
+      this.obstacles.push(obs)
+      this.add(obs.mesh)
+    }
   }
 
   resize () {
@@ -35,7 +53,27 @@ export class Scene extends ThreeScene {
   }
 
   render () {
-    // Pas de physique ni d'interaction — juste rendu du cube
+    // step physique
+    const delta = this.engine.clock.getDelta()
+    // Rapier step (sans integrateur supplémentaire)
+    this.world.step()
+
+    // mise à jour du starship
+    if (this.starship && !this.starship.destroyed) {
+      this.starship.update(delta)
+      // collision simple AABB entre mesh threejs
+      const shipBox = new Box3().setFromObject(this.starship.mesh)
+      for (const obs of this.obstacles) {
+        const obsBox = obs.getAABB()
+        if (shipBox.intersectsBox(obsBox)) {
+          // destruction
+          this.starship.destroy(this.world)
+          break
+        }
+      }
+    }
+
+    // rendu
     this.engine.renderer.render(this, this.camera)
   }
 }
