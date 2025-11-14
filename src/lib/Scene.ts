@@ -62,7 +62,7 @@ export class Scene extends ThreeScene {
     const input = this.controls.getInput()
 
     if (this.starship && !this.starship.destroyed) {
-      this.starship.update(delta, input) // <-- input utilisé ici
+      this.starship.update(delta, input)
       // collision simple AABB entre mesh threejs
       const shipBox = new Box3().setFromObject(this.starship.mesh)
       for (const obs of this.obstacles) {

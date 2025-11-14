@@ -96,21 +96,24 @@ export class Starship {
   private updateCamera (deltaTime = 0.016) {
     if (!this.camera) return
 
+    // centre du vaisseau (origine du mesh)
     const target = this.mesh.position.clone()
-    const desiredCamPos = target.clone().add(this.cameraOffset)
 
-    // si deltaTime <= 0 on force un snap immédiat (utile à l'attachement)
+    // calculer la position désirée de la caméra en tenant compte de la rotation du vaisseau
+    const offset = this.cameraOffset.clone()
+    offset.applyQuaternion(this.mesh.quaternion) // appliquer la rotation du vaisseau à l'offset
+    const desiredCamPos = target.clone().add(offset)
+
     const tCam = deltaTime > 0 ? 1 - Math.exp(-this.cameraSmooth * deltaTime) : 1
 
     // lisser la position
     this.camera.position.lerp(desiredCamPos, tCam)
 
-    // lisser l'orientation de la caméra vers regarder le vaisseau
+    // lisser l'orientation de la caméra vers regarder le centre du vaisseau
     const m = new Matrix4().lookAt(this.camera.position, target, this.camera.up)
     const targetQuat = new Quaternion().setFromRotationMatrix(m)
     this.camera.quaternion.slerp(targetQuat, tCam)
 
-    // mise à jour éventuelle (utile seulement si fov/aspect change, mais sans effet nocif)
     this.camera.updateProjectionMatrix()
   }
 
