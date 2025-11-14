@@ -34,7 +34,6 @@ export class Controls {
     const lift = (up ? 1 : 0) - (down ? 1 : 0)
     const throttle = (accel ? 1 : 0) - (brake ? 1 : 0)
 
-    // retourner en tant que Vector3 (x=strafe, y=lift, z=throttle)
     return new Vector3(strafe, lift, throttle)
   }
 }
