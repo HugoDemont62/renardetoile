@@ -18,12 +18,11 @@ export class Obstacle {
   }
 
   getAABB (): Box3 {
-    const box = new Box3().setFromObject(this.mesh)
-    return box
+    return new Box3().setFromObject(this.mesh)
   }
 
   destroy (world: World) {
-    try { world.removeRigidBody(this.body) } catch {}
+    try { world.removeRigidBody(this.body) } catch { /* empty */ }
     if (this.mesh.parent) this.mesh.parent.remove(this.mesh)
   }
 }
