@@ -2,6 +2,7 @@ import { Vector3 } from 'three'
 
 export class Controls {
   private keys: Record<string, boolean> = {}
+  private shoot = false
 
   constructor () {
     globalThis.addEventListener('keydown', this.onKeyDown)
@@ -15,6 +16,9 @@ export class Controls {
 
   private onKeyDown = (e: KeyboardEvent) => {
     this.keys[e.key.toLowerCase()] = true
+    if (e.key.toLowerCase() === 'e' || e.key === 'Enter') {
+      this.shoot = true
+    }
   }
 
   private onKeyUp = (e: KeyboardEvent) => {
@@ -35,5 +39,13 @@ export class Controls {
     const throttle = (accel ? 1 : 0) - (brake ? 1 : 0)
 
     return new Vector3(strafe, lift, throttle)
+  }
+
+  getShoot(): boolean {
+    if (this.shoot) {
+      this.shoot = false
+      return true
+    }
+    return false
   }
 }
