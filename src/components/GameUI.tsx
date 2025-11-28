@@ -49,10 +49,10 @@ export function GameUI({ engine }: GameUIProps) {
         zIndex: 10
       }}>
         <div style={{ textAlign: 'center' }}>
-          <h1 style={{ fontSize: '4rem', marginBottom: '2rem', color: '#00ff00' }}>STAR FOX</h1>
-          <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>ZQSD / Arrows - Move</p>
-          <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Space - Accelerate</p>
-          <p style={{ fontSize: '1.2rem', marginBottom: '2rem' }}>E / Enter - Shoot</p>
+          <h1 style={{ fontSize: '4rem', marginBottom: '2rem', color: '#00ff00' }}>Renard Etoile</h1>
+          <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>ZQSD / Arrows - Mouvements</p>
+          <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Space - Accélération</p>
+          <p style={{ fontSize: '1.2rem', marginBottom: '2rem' }}>E / Enter - Tirer</p>
           <button
             onClick={startGame}
             style={{
