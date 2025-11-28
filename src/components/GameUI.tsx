@@ -50,9 +50,9 @@ export function GameUI({ engine }: GameUIProps) {
       }}>
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ fontSize: '4rem', marginBottom: '2rem', color: '#00ff00' }}>Renard Etoile</h1>
-          <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>ZQSD / Arrows - Mouvements</p>
+          <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>ZQSD - Mouvements</p>
           <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Space - Accélération</p>
-          <p style={{ fontSize: '1.2rem', marginBottom: '2rem' }}>E / Enter - Tirer</p>
+          <p style={{ fontSize: '1.2rem', marginBottom: '2rem' }}>E - Tirer</p>
           <button
             onClick={startGame}
             style={{

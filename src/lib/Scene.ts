@@ -1,4 +1,4 @@
-import { Box3, PerspectiveCamera, Scene as ThreeScene, Vector2, Vector3 } from 'three'
+import { Box3, BoxHelper, PerspectiveCamera, Scene as ThreeScene, Vector2, Vector3 } from 'three'
 import { Engine } from './Engine'
 import { World } from '@dimforge/rapier3d'
 import { Starship } from '../Class/Starship'
@@ -6,6 +6,8 @@ import { Obstacle } from '../Class/Obstacle'
 import { Controls } from './Controls'
 import { Laser } from '../Class/Laser'
 import { Enemy } from '../Class/Enemy'
+import { Stats } from './Stats'
+import { Debug } from './Debug'
 
 export class Scene extends ThreeScene {
   engine: Engine
@@ -17,12 +19,15 @@ export class Scene extends ThreeScene {
   lasers: Laser[] = []
   enemies: Enemy[] = []
   controls: Controls
+  stats: Stats
+  debug: Debug
 
   score = 0
   gameOver = false
   private spawnTimer = 0
   private spawnInterval = 2
   private distanceTraveled = 0
+  private hitboxHelpers: BoxHelper[] = []
 
   onScoreUpdate?: (score: number) => void
   onGameOver?: () => void
@@ -38,6 +43,8 @@ export class Scene extends ThreeScene {
     this.world = new World({x: 0.0, y: 0.0, z: 0.0})
 
     this.controls = new Controls()
+    this.stats = new Stats()
+    this.debug = new Debug()
 
     this.starship = new Starship(this.world, 10)
     this.add(this.starship.mesh)
@@ -63,7 +70,7 @@ export class Scene extends ThreeScene {
   render () {
     if (this.gameOver) return
 
-    const delta = this.engine.clock.getDelta()
+    const delta = this.engine.clock.getDelta() * this.debug.speedMultiplier
     this.world.step()
 
     const input = this.controls.getInput()
@@ -78,21 +85,23 @@ export class Scene extends ThreeScene {
         this.starship.resetShootCooldown()
       }
 
-      const shipBox = new Box3().setFromObject(this.starship.mesh)
-      for (const obs of this.obstacles) {
-        const obsBox = obs.getAABB()
-        if (shipBox.intersectsBox(obsBox)) {
-          this.handleGameOver()
-          break
+      if (!this.debug.invincible && !this.debug.noClip) {
+        const shipBox = new Box3().setFromObject(this.starship.mesh)
+        for (const obs of this.obstacles) {
+          const obsBox = obs.getAABB()
+          if (shipBox.intersectsBox(obsBox)) {
+            this.handleGameOver()
+            break
+          }
         }
-      }
 
-      for (const enemy of this.enemies) {
-        if (enemy.destroyed) continue
-        const enemyBox = enemy.getAABB()
-        if (shipBox.intersectsBox(enemyBox)) {
-          this.handleGameOver()
-          break
+        for (const enemy of this.enemies) {
+          if (enemy.destroyed) continue
+          const enemyBox = enemy.getAABB()
+          if (shipBox.intersectsBox(enemyBox)) {
+            this.handleGameOver()
+            break
+          }
         }
       }
     }
@@ -143,7 +152,51 @@ export class Scene extends ThreeScene {
       }
     })
 
+    if (this.debug.showHitboxes) {
+      this.updateHitboxes()
+    } else {
+      this.clearHitboxes()
+    }
+
+    this.stats.update(
+      {
+        lasers: this.lasers.length,
+        enemies: this.enemies.length,
+        obstacles: this.obstacles.length
+      },
+      this.starship?.getPosition()
+    )
+
     this.engine.renderer.render(this, this.camera)
+  }
+
+  private updateHitboxes() {
+    this.clearHitboxes()
+
+    if (this.starship && !this.starship.destroyed) {
+      const helper = new BoxHelper(this.starship.mesh, 0x00ff00)
+      this.hitboxHelpers.push(helper)
+      this.add(helper)
+    }
+
+    this.enemies.forEach(enemy => {
+      if (!enemy.destroyed) {
+        const helper = new BoxHelper(enemy.mesh, 0xff0066)
+        this.hitboxHelpers.push(helper)
+        this.add(helper)
+      }
+    })
+
+    this.obstacles.forEach(obs => {
+      const helper = new BoxHelper(obs.mesh, 0x808080)
+      this.hitboxHelpers.push(helper)
+      this.add(helper)
+    })
+  }
+
+  private clearHitboxes() {
+    this.hitboxHelpers.forEach(helper => this.remove(helper))
+    this.hitboxHelpers = []
   }
 
   private shoot() {
@@ -183,8 +236,11 @@ export class Scene extends ThreeScene {
 
   dispose () {
     this.controls.dispose()
+    this.stats.dispose()
+    this.debug.dispose()
     this.lasers.forEach(l => l.destroy(this.world))
     this.enemies.forEach(e => e.destroy(this.world))
     this.obstacles.forEach(o => o.destroy(this.world))
+    this.clearHitboxes()
   }
 }
