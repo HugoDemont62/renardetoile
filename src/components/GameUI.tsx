@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Engine } from '../lib/Engine'
 import { Scene } from '../lib/Scene'
 
@@ -7,7 +7,7 @@ interface GameUIProps {
 }
 
 export function GameUI({ engine }: GameUIProps) {
-  const [gameState, setGameState] = useState<'menu' | 'playing' | 'gameover'>('menu')
+  const [gameState, setGameState] = useState<'menu' | 'playing' | 'gameover'>('playing') // démarrage direct
   const [score, setScore] = useState(0)
   const [finalScore, setFinalScore] = useState(0)
 
@@ -18,17 +18,21 @@ export function GameUI({ engine }: GameUIProps) {
     const scene = new Scene(engine)
     scene.onScoreUpdate = (s) => setScore(s)
     scene.onGameOver = () => {
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
-      setFinalScore(s => {
+      setFinalScore(() => {
         const currentScore = score
         setGameState('gameover')
         return currentScore
       })
     }
-    // eslint-disable-next-line react-hooks/immutability
     engine.scene = scene
     engine.resize()
   }
+
+  useEffect(() => {
+    // démarre automatiquement une seule fois au montage
+    if (!engine.scene) startGame()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const returnToMenu = () => {
     if (engine.scene) {
@@ -52,24 +56,7 @@ export function GameUI({ engine }: GameUIProps) {
       }}>
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ fontSize: '4rem', marginBottom: '2rem', color: '#00ff00' }}>Renard Etoile</h1>
-          <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>ZQSD - Mouvements</p>
-          <p style={{ fontSize: '1.2rem', marginBottom: '1rem' }}>Space - Accélération</p>
-          <p style={{ fontSize: '1.2rem', marginBottom: '2rem' }}>E - Tirer</p>
-          <button
-            onClick={startGame}
-            style={{
-              fontSize: '1.5rem',
-              padding: '1rem 3rem',
-              background: '#00ff00',
-              color: 'black',
-              border: 'none',
-              cursor: 'pointer',
-              fontFamily: 'monospace',
-              fontWeight: 'bold'
-            }}
-          >
-            START GAME
-          </button>
+          <button onClick={startGame}>START GAME</button>
         </div>
       </div>
     )
@@ -91,19 +78,16 @@ export function GameUI({ engine }: GameUIProps) {
         <div style={{ textAlign: 'center' }}>
           <h1 style={{ fontSize: '3rem', marginBottom: '2rem', color: '#ff0000' }}>GAME OVER</h1>
           <p style={{ fontSize: '2rem', marginBottom: '2rem' }}>Score: {finalScore}</p>
-          <button
-            onClick={returnToMenu}
-            style={{
-              fontSize: '1.5rem',
-              padding: '1rem 3rem',
-              background: '#00ff00',
-              color: 'black',
-              border: 'none',
-              cursor: 'pointer',
-              fontFamily: 'monospace',
-              fontWeight: 'bold'
-            }}
-          >
+          <button onClick={returnToMenu} style={{
+            fontSize: '1.5rem',
+            padding: '1rem 3rem',
+            background: '#00ff00',
+            color: 'black',
+            border: 'none',
+            cursor: 'pointer',
+            fontFamily: 'monospace',
+            fontWeight: 'bold'
+          }}>
             MENU
           </button>
         </div>

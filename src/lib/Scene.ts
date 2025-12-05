@@ -7,10 +7,14 @@ import {
   AmbientLight,
   DirectionalLight,
   PointLight,
-  HemisphereLight
+  HemisphereLight,
+  Color,
+  PlaneGeometry,
+  Mesh,
+  MeshStandardMaterial
 } from 'three'
-import { Engine } from './Engine'
 import { World } from '@dimforge/rapier3d'
+import { Engine } from './Engine'
 import { Starship } from '../Class/Starship'
 import { Obstacle } from '../Class/Obstacle'
 import { Controls } from './Controls'
@@ -20,6 +24,7 @@ import { Stats } from './Stats'
 import { Debug } from './Debug'
 import { ParticleExplosion } from '../Class/ParticleExplosion'
 
+type Disposable = { geometry?: { dispose(): void }, material?: { dispose(): void } }
 
 export class Scene extends ThreeScene {
   engine: Engine
@@ -38,7 +43,6 @@ export class Scene extends ThreeScene {
   private gameOverPendingTimer = 0
   private gameOverPendingDelay = 1.5
 
-  // Lumières
   private ambientLight?: AmbientLight
   private directionalLight?: DirectionalLight
   private shipLight?: PointLight
@@ -53,58 +57,112 @@ export class Scene extends ThreeScene {
   onScoreUpdate?: (score: number) => void
   onGameOver?: () => void
 
+  private deathSound?: HTMLAudioElement
+
+  // pour ne créer l'explosion qu'une seule fois par ennemi détruit
+  private processedDestroyed = new Set<Enemy>()
+
+  // génération du monde : paramètres configurables
+  private worldGroundY = -2
+  private worldGroundSize = 1200
+  private worldObstacleCount = 8
+  private worldObstacleSpacing = 30
+  private worldObstacleAreaWidth = 20
+  private worldObstacleScaleMultiplier = 2
+
   constructor (engine: Engine) {
     super()
     this.engine = engine
+
+    // ciel bleu
+    this.background = new Color(0x87ceeb)
 
     this.camera = new PerspectiveCamera(60, 1, 0.1, 1000)
     this.camera.position.set(0, 2, 6)
     this.camera.lookAt(0, 0, 0)
 
-    this.world = new World({x: 0.0, y: 0.0, z: 0.0})
+    this.world = new World({ x: 0.0, y: 0.0, z: 0.0 })
 
     this.controls = new Controls()
     this.stats = new Stats()
     this.debug = new Debug()
 
-    // Ajouter les lumières à la scène
+    // charger son de mort (public/sounds/death.wav)
+    try {
+      this.deathSound = new Audio('/sounds/death.wav')
+      this.deathSound.load()
+    } catch (err) {
+      console.warn('Impossible de charger death sound', err)
+    }
+
+    // génération automatique du monde : sol + obstacles
+    this.generateWorld()
+
     this.setupLights()
 
     this.starship = new Starship(this.world, 10)
     this.add(this.starship.mesh)
     this.starship.attachCamera(this.camera, new Vector3(0, 4, 10))
+  }
 
-    for (let i = 1; i <= 6; i++) {
-      const x = (Math.random() - 0.5) * 10
-      const z = -i * 15
+  private generateWorld() {
+    this.generateGround(this.worldGroundSize, this.worldGroundY)
+    this.generateObstacles({
+      count: this.worldObstacleCount,
+      spacing: this.worldObstacleSpacing,
+      areaWidth: this.worldObstacleAreaWidth,
+      scaleMultiplier: this.worldObstacleScaleMultiplier
+    })
+  }
+
+  private generateGround(size = 1200, y = -2) {
+    const groundGeom = new PlaneGeometry(size, size)
+    const groundMat = new MeshStandardMaterial({ color: 0x00b300, roughness: 1 })
+    const ground = new Mesh(groundGeom, groundMat)
+    ground.rotation.x = -Math.PI / 2
+    ground.position.y = y
+    ground.receiveShadow = false
+    ground.name = 'Ground'
+    this.add(ground)
+  }
+
+  private generateObstacles(opts: { count?: number, spacing?: number, areaWidth?: number, scaleMultiplier?: number } = {}) {
+    const count = opts.count ?? 8
+    const spacing = opts.spacing ?? 30
+    const areaWidth = opts.areaWidth ?? 20
+    const scaleMultiplier = opts.scaleMultiplier ?? 2
+    const baseTexture = '/textures/building.jpg'
+
+    // start slightly ahead so first obstacles aren't on top of the ship
+    for (let i = 1; i <= count; i++) {
+      const x = (Math.random() - 0.5) * areaWidth
+      const z = -i * spacing - Math.random() * (spacing * 0.3)
       const height = 6 + Math.random() * 10
-      const obs = new Obstacle(this.world, new Vector3(x, height / 2, z), new Vector3(3, height, 3))
-      this.obstacles.push(obs)
-      this.add(obs.mesh)
+      const size = new Vector3(3 * scaleMultiplier, height * scaleMultiplier, 3 * scaleMultiplier)
+      const posY = this.worldGroundY + (size.y / 2)
+      try {
+        const obs = new Obstacle(this.world, new Vector3(x, posY, z), size, baseTexture)
+        this.obstacles.push(obs)
+        this.add(obs.mesh)
+      } catch (err) {
+        console.warn('Obstacle generation failed for index', i, err)
+      }
     }
   }
 
   private setupLights() {
-    // 1. Lumière ambiante - éclaire tout uniformément (lumière de base)
-    this.ambientLight = new AmbientLight(0x404040, 1.5) // couleur grise douce, intensité 1.5
+    this.ambientLight = new AmbientLight(0x404040, 1.5)
     this.add(this.ambientLight)
 
-    // 2. Lumière hémisphérique - simule le ciel et le sol
-    const hemisphereLight = new HemisphereLight(
-      0x4040ff, // couleur du ciel (bleu foncé)
-      0x202020, // couleur du sol (gris très foncé)
-      0.8 // intensité
-    )
+    const hemisphereLight = new HemisphereLight(0x4040ff, 0x202020, 0.8)
     this.add(hemisphereLight)
 
-    // 3. Lumière directionnelle - comme le soleil, éclaire dans une direction
     this.directionalLight = new DirectionalLight(0xffffff, 1.5)
     this.directionalLight.position.set(5, 10, 5)
-    this.directionalLight.castShadow = false // pas d'ombres pour meilleures perfs
+    this.directionalLight.castShadow = false
     this.add(this.directionalLight)
 
-    // 4. Lumière ponctuelle qui suit le vaisseau - pour l'effet "projecteur"
-    this.shipLight = new PointLight(0x00ffff, 2, 50) // couleur cyan, intensité 2, portée 50
+    this.shipLight = new PointLight(0x00ffff, 2, 50)
     this.add(this.shipLight)
 
     console.log('✨ Lumières ajoutées à la scène')
@@ -121,29 +179,26 @@ export class Scene extends ThreeScene {
     if (this.gameOver) return
 
     const delta = this.engine.clock.getDelta() * this.debug.speedMultiplier
-    this.world.step()
+    try {
+      this.world.step()
+    } catch (err) {
+      console.warn('world.step error', err)
+    }
 
     const input = this.controls.getInput()
 
     if (this.starship && !this.starship.destroyed) {
       this.starship.update(delta, input)
 
-      // Faire suivre la lumière du vaisseau
+      // suivre la lumière du vaisseau
       if (this.shipLight) {
-        const shipPos = this.starship.getPosition()
-        this.shipLight.position.set(shipPos.x, shipPos.y + 2, shipPos.z)
+        const sp = this.starship.getPosition()
+        this.shipLight.position.set(sp.x, sp.y + 2, sp.z + 6)
       }
 
-      // Faire suivre la lumière directionnelle (optionnel)
       if (this.directionalLight) {
-        const shipPos = this.starship.getPosition()
-        this.directionalLight.position.set(
-          shipPos.x + 5,
-          shipPos.y + 10,
-          shipPos.z + 5
-        )
-        this.directionalLight.target.position.copy(shipPos)
-        this.directionalLight.target.updateMatrixWorld()
+        const sp = this.starship.getPosition()
+        this.directionalLight.position.set(sp.x + 5, sp.y + 10, sp.z + 5)
       }
 
       this.distanceTraveled += delta
@@ -153,91 +208,128 @@ export class Scene extends ThreeScene {
         this.starship.resetShootCooldown()
       }
 
+      // collisions vaisseau <-> ennemis / obstacles
       if (!this.debug.invincible && !this.debug.noClip) {
-        const shipBox = this.starship.getCollisionAABB()
-        for (const obs of this.obstacles) {
-          const obsBox = obs.getAABB()
-          if (shipBox.intersectsBox(obsBox)) {
-            this.handleGameOver()
-            break
+        try {
+          const shipBox = this.starship.getCollisionAABB()
+          for (const enemy of this.enemies) {
+            if (enemy.destroyed) continue
+            if (enemy.getAABB().intersectsBox(shipBox)) {
+              this.handleGameOver()
+              break
+            }
           }
-        }
 
-        for (const enemy of this.enemies) {
-          if (enemy.destroyed) continue
-          const enemyBox = enemy.getAABB()
-          if (shipBox.intersectsBox(enemyBox)) {
-            this.handleGameOver()
-            break
+          for (const obs of this.obstacles) {
+            if (obs.mesh && obs.getAABB().intersectsBox(shipBox)) {
+              this.handleGameOver()
+              break
+            }
           }
+        } catch (err) {
+          console.warn('Collision checks failed', err)
         }
       }
     }
 
+    // lasers update + collisions
     this.lasers = this.lasers.filter(laser => {
       const alive = laser.update(delta)
       if (!alive) {
-        laser.destroy(this.world)
+        try {
+          laser.destroy(this.world)
+        } catch (err) {
+          console.warn('laser.destroy failed', err)
+        }
+        if (laser.mesh.parent) laser.mesh.parent.remove(laser.mesh)
         return false
       }
 
-      const laserBox = laser.getAABB()
-      for (const enemy of this.enemies) {
-        if (enemy.destroyed) continue
-        const enemyBox = enemy.getAABB()
-        if (laserBox.intersectsBox(enemyBox)) {
-          const enemyPos = enemy.getPosition().clone()
-          enemy.destroy(this.world)
-
-          // créer l'explosion en passant la Scene (this) et non le World
-          const explosion = new ParticleExplosion(this, enemyPos, 5)
-          this.explosions.push(explosion)
-          this.add(explosion.mesh)
-
-          laser.destroy(this.world)
-          this.addScore(10)
-          return false
+      // collisions laser <-> enemy
+      try {
+        const la = laser.getAABB()
+        for (const enemy of this.enemies) {
+          if (enemy.destroyed) continue
+          if (enemy.getAABB().intersectsBox(la)) {
+            // explosion + score
+            enemy.destroyed = true
+            this.addScore(100)
+            try {
+              const ex = new ParticleExplosion(this, enemy.getPosition(), 2)
+              this.explosions.push(ex)
+              this.add(ex.mesh)
+            } catch (err) {
+              console.warn('ParticleExplosion creation failed', err)
+            }
+            break
+          }
         }
+      } catch (err) {
+        console.warn('Laser collision check failed', err)
       }
 
       return true
     })
 
-    // mettre à jour les explosions et supprimer les terminées
+    // explosions update
     this.explosions = this.explosions.filter(ex => {
       const alive = ex.update(delta)
       if (!alive) {
-        // appeler destroy sans passer this.world
         ex.destroy()
-        if (ex.mesh.parent === this) this.remove(ex.mesh)
         return false
       }
       return true
     })
 
-    const shipPos = this.starship?.getPosition()
+    // update ennemis
     for (const enemy of this.enemies) {
       if (!enemy.destroyed) {
-        enemy.update(delta, shipPos)
-        if (enemy.getPosition().z > 20) {
-          enemy.destroy(this.world)
+        try {
+          enemy.update(delta, this.starship?.getPosition())
+          // sync mesh with body translation if needed (enemy handles it)
+        } catch (err) {
+          console.warn('Enemy update failed', err)
         }
       }
     }
 
-    this.enemies = this.enemies.filter(e => !e.destroyed)
+    // créer explosion pour ennemis détruits non encore traités (sécurité)
+    for (const enemy of this.enemies) {
+      if (enemy.destroyed && !this.processedDestroyed.has(enemy)) {
+        try {
+          const ex = new ParticleExplosion(this, enemy.getPosition(), 2)
+          this.explosions.push(ex)
+          this.add(ex.mesh)
+        } catch (err) {
+          console.warn('ParticleExplosion creation failed (post-destroy)', err)
+        }
+        this.processedDestroyed.add(enemy)
+      }
+    }
 
+    // nettoyer ennemis détruits
+    this.enemies = this.enemies.filter(e => {
+      if (e.destroyed) {
+        try { e.destroy(this.world) } catch (err) { console.warn('removeRigidBody failed (enemy)', err) }
+        return false
+      }
+      return true
+    })
+
+    // spawn
     this.spawnTimer += delta
     if (this.spawnTimer >= this.spawnInterval) {
       this.spawnTimer = 0
       this.spawnEnemy()
     }
 
+    // retirer obstacles trop loins
     this.obstacles.forEach(obs => {
       if (this.starship && obs.mesh.position.z > this.starship.getPosition().z + 20) {
-        obs.mesh.position.z -= 120
+        try { obs.destroy(this.world) } catch (err) { console.warn('obs.destroy failed', err) }
       }
     })
+    this.obstacles = this.obstacles.filter(o => o.mesh.parent)
 
     if (this.debug.showHitboxes) {
       this.updateHitboxes()
@@ -246,25 +338,19 @@ export class Scene extends ThreeScene {
     }
 
     this.stats.update(
-      {
-        lasers: this.lasers.length,
-        enemies: this.enemies.length,
-        obstacles: this.obstacles.length
-      },
+      { lasers: this.lasers.length, enemies: this.enemies.length, obstacles: this.obstacles.length },
       this.starship?.getPosition()
     )
+
     if (this.gameOverPending) {
       this.gameOverPendingTimer += delta
       if (this.gameOverPendingTimer >= this.gameOverPendingDelay) {
-        this.gameOverPending = false
         this.gameOver = true
-        if (this.onGameOver) {
-          this.onGameOver()
-        }
+        if (this.onGameOver) this.onGameOver()
       }
     }
 
-    this.engine.renderer.render(this, this.camera)
+    this.engine.render(this, this.camera)
   }
 
   private updateHitboxes() {
@@ -278,7 +364,7 @@ export class Scene extends ThreeScene {
 
     this.enemies.forEach(enemy => {
       if (!enemy.destroyed) {
-        const helper = new BoxHelper(enemy.mesh, 0xff0066)
+        const helper = new BoxHelper(enemy.mesh, 0xff0000)
         this.hitboxHelpers.push(helper)
         this.add(helper)
       }
@@ -308,7 +394,7 @@ export class Scene extends ThreeScene {
 
   private spawnEnemy() {
     if (!this.starship) return
-    const x = (Math.random() - 0.5) * 15
+    const x = (Math.random() - 0.5) * 20
     const y = Math.random() * 8 + 2
     const z = this.starship.getPosition().z - 50
     const enemy = new Enemy(this.world, new Vector3(x, y, z), 8)
@@ -324,40 +410,63 @@ export class Scene extends ThreeScene {
   }
 
   private handleGameOver() {
-    // éviter les doubles appels
     if (this.gameOverPending || this.gameOver) return
+
+    try {
+      if (this.deathSound) {
+        try { this.deathSound.currentTime = 0 } catch (err) { console.warn('reset deathSound time failed', err) }
+        this.deathSound.play().catch(() => { /* autoplay blocked */ })
+      }
+    } catch (err) {
+      console.warn('Erreur en jouant le son de mort', err)
+    }
 
     if (this.starship) {
       const shipPos = this.starship.getPosition().clone()
-      // créer explosion du vaisseau
-      const explosion = new ParticleExplosion(this, shipPos, 8)
-      this.explosions.push(explosion)
-      this.add(explosion.mesh)
+      try {
+        const explosion = new ParticleExplosion(this, shipPos, 8)
+        this.explosions.push(explosion)
+        this.add(explosion.mesh)
+      } catch (err) {
+        console.warn('ParticleExplosion creation failed (game over)', err)
+      }
     }
 
-    // détruire le vaisseau pour couper le contrôle immédiatement
     this.starship?.destroy(this.world)
 
-    // marquer la fin comme "en attente" pour laisser le temps aux effets de se jouer
     this.gameOverPending = true
     this.gameOverPendingTimer = 0
   }
 
   dispose () {
     this.controls.dispose()
-    this.stats.dispose()
-    this.debug.dispose()
-    this.lasers.forEach(l => l.destroy(this.world))
-    this.enemies.forEach(e => e.destroy(this.world))
-    this.obstacles.forEach(o => o.destroy(this.world))
+    try { this.stats.dispose() } catch (err) { console.warn('stats dispose failed', err) }
+    try { this.debug.dispose() } catch (err) { console.warn('debug dispose failed', err) }
 
-    this.explosions.forEach(ex => {
-      // appeler destroy sans passer this.world
-      ex.destroy()
-      if (ex.mesh.parent === this) this.remove(ex.mesh)
+    this.lasers.forEach(l => {
+      try { l.destroy(this.world) } catch (err) { console.warn('laser.destroy failed during dispose', err) }
     })
-    this.explosions = []
+    this.enemies.forEach(e => {
+      try { e.destroy(this.world) } catch (err) { console.warn('enemy.destroy failed during dispose', err) }
+    })
+    this.obstacles.forEach(o => {
+      try { o.destroy(this.world) } catch (err) { console.warn('obstacle.destroy failed during dispose', err) }
+    })
 
-    this.clearHitboxes()
+    this.lasers = []
+    this.enemies = []
+    this.obstacles = []
+    this.explosions.forEach(ex => ex.destroy())
+    this.explosions = []
+    this.processedDestroyed.clear()
+
+    // remove all children and dispose resources safely
+    while (this.children.length) {
+      const c = this.children[0]
+      const d = c as Disposable
+      try { d.geometry?.dispose() } catch (err) { console.warn('geometry.dispose failed', err) }
+      try { d.material?.dispose() } catch (err) { console.warn('material.dispose failed', err) }
+      this.remove(c)
+    }
   }
 }

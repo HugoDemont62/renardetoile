@@ -1,10 +1,12 @@
 import { Clock, WebGLRenderer } from 'three'
-import type { Scene } from './Scene.ts'
+import type { Scene } from './Scene'
+import { PostProcessing } from './PostProcessing'
 
 export class Engine {
   renderer: WebGLRenderer
   clock: Clock
   scene?: Scene
+  private post?: PostProcessing
 
   constructor (parent?: HTMLElement) {
     this.renderer = new WebGLRenderer()
@@ -16,6 +18,9 @@ export class Engine {
     this.renderer.setAnimationLoop(this.update.bind(this))
 
     globalThis.addEventListener('resize', this.resize)
+
+    // initialiser postprocessing (pixelSize par défaut = 6)
+    this.post = new PostProcessing(this.renderer, 6)
   }
 
   setScene(S: new (engine: Engine) => Scene) {
@@ -33,6 +38,17 @@ export class Engine {
 
   resize = () => {
     this.renderer.setSize(globalThis.innerWidth, globalThis.innerHeight)
+    // redimensionner composer si présent
+    if (this.post) this.post.setSize(globalThis.innerWidth, globalThis.innerHeight)
     this.scene?.resize()
+  }
+
+  // méthode pour que la Scene demande le rendu — utilise composer si présent
+  render(scene: any, camera: any) {
+    if (this.post) {
+      this.post.render(scene, camera)
+    } else {
+      this.renderer.render(scene, camera)
+    }
   }
 }

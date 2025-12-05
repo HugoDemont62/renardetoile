@@ -31,6 +31,10 @@ export class Starship {
   private barrelRollDuration = 0.6
   private barrelRollDirection = 1
 
+  // Nouveaux champs pour hitbox améliorée (local space)
+  private localCollisionBox?: Box3
+  private localCollisionSphere?: Sphere
+
   constructor (world: World, speed: number) {
     this.speed = speed
     this.mesh = new Group()
@@ -77,6 +81,9 @@ export class Starship {
       gltf.scene.position.sub(center)
 
       this.modelLoaded = true
+
+      // Calculer les bounds locaux serrés
+      this.computeCollisionBounds()
       console.log('✅ Modèle 3D chargé avec succès')
     } catch (error) {
       console.error('❌ Erreur lors du chargement du modèle 3D:', error)
@@ -88,7 +95,45 @@ export class Starship {
       )
       this.mesh.add(fallbackMesh)
       this.modelLoaded = true
+
+      // calculer bounds pour le fallback aussi
+      this.computeCollisionBounds()
     }
+  }
+
+  // Calcule des bounds locaux plus serrés et stocke Box3 / Sphere (local space)
+  private computeCollisionBounds() {
+    // garantit que la géométrie enfant est prise en compte
+    const box = new Box3().setFromObject(this.mesh)
+
+    // si box invalide, fallback
+    const size = box.getSize(new Vector3())
+    if (size.x <= 0 || size.y <= 0 || size.z <= 0) {
+      // fallback simple centré
+      this.localCollisionBox = new Box3().setFromCenterAndSize(new Vector3(0,0,0), new Vector3(1,1,3))
+      this.localCollisionSphere = this.localCollisionBox.getBoundingSphere(new Sphere())
+      this.localCollisionSphere.radius *= 0.9
+      return
+    }
+
+    // réduire la box localement d'un pourcentage pour éviter faux positifs (ailes, espaces vides)
+    const shrinkFactor = 0.15 // 15% de réduction sur chaque axe
+    const shrink = new Vector3(size.x * shrinkFactor, size.y * shrinkFactor, size.z * shrinkFactor)
+    const localBox = box.clone()
+    localBox.expandByVector(shrink.clone().negate()) // shrink
+
+    // safety clamp si shrink trop important
+    const newSize = localBox.getSize(new Vector3())
+    if (newSize.x <= 0 || newSize.y <= 0 || newSize.z <= 0) {
+      this.localCollisionBox = box.clone()
+    } else {
+      this.localCollisionBox = localBox
+    }
+
+    // sphere locale basée sur la box locale, légèrement réduite
+    const s = this.localCollisionBox.getBoundingSphere(new Sphere())
+    s.radius *= 0.9
+    this.localCollisionSphere = s
   }
 
   attachCamera (camera: PerspectiveCamera, offset?: Vector3) {
@@ -211,9 +256,17 @@ export class Starship {
 
   // Retourne une sphère englobante calculée à partir du mesh (plus précise pour collisions mesh-vs-mesh)
   getCollisionSphere(): Sphere {
+    // utiliser la sphere locale transformée dans l'espace monde pour plus de précision
+    if (this.localCollisionSphere) {
+      // s'assurer que la matrice world est à jour
+      this.mesh.updateMatrixWorld(true)
+      const worldSphere = this.localCollisionSphere.clone()
+      worldSphere.center.applyMatrix4(this.mesh.matrixWorld)
+      return worldSphere
+    }
+
     const box = new Box3().setFromObject(this.mesh)
     const sphere = box.getBoundingSphere(new Sphere())
-    // si trop petit, fallback centré sur le vaisseau
     if (!sphere || sphere.radius <= 0.001) {
       return new Sphere(this.getPosition(), 1.5)
     }
@@ -221,6 +274,21 @@ export class Starship {
   }
 
   getCollisionAABB(marginX = 0.75, marginY = 0.5, marginZ = 0.5): Box3 {
+    // si on a une box locale calculée, l'appliquer dans l'espace monde et ajuster par marge
+    if (this.localCollisionBox) {
+      this.mesh.updateMatrixWorld(true)
+      const worldBox = this.localCollisionBox.clone().applyMatrix4(this.mesh.matrixWorld)
+      // shrink by provided margins (marges négatives ici réduisent la box)
+      worldBox.expandByVector(new Vector3(-marginX, -marginY, -marginZ))
+      const size = worldBox.getSize(new Vector3())
+      if (size.x <= 0 || size.y <= 0 || size.z <= 0) {
+        // fallback sur box sans margin
+        return this.localCollisionBox.clone().applyMatrix4(this.mesh.matrixWorld)
+      }
+      return worldBox
+    }
+
+    // fallback existant si pas de bounds calculés
     const box = new Box3().setFromObject(this.mesh)
     box.expandByVector(new Vector3(-marginX, -marginY, -marginZ))
 
