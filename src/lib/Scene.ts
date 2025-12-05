@@ -58,6 +58,7 @@ export class Scene extends ThreeScene {
   onGameOver?: () => void
 
   private deathSound?: HTMLAudioElement
+  private enemyDeathSound?: HTMLAudioElement
 
   // pour ne créer l'explosion qu'une seule fois par ennemi détruit
   private processedDestroyed = new Set<Enemy>()
@@ -89,10 +90,17 @@ export class Scene extends ThreeScene {
 
     // charger son de mort (public/sounds/death.wav)
     try {
-      this.deathSound = new Audio('/sounds/death.wav')
+      this.deathSound = new Audio('/sounds/death.mp3')
       this.deathSound.load()
     } catch (err) {
       console.warn('Impossible de charger death sound', err)
+    }
+
+    try {
+      this.enemyDeathSound = new Audio('/sounds/deathennemy.mp3')
+      this.enemyDeathSound.load()
+    } catch (err) {
+      console.warn('Impossible de charger enemy death sound', err)
     }
 
     // génération automatique du monde : sol + obstacles
@@ -151,10 +159,10 @@ export class Scene extends ThreeScene {
   }
 
   private setupLights() {
-    this.ambientLight = new AmbientLight(0x404040, 1.5)
+    this.ambientLight = new AmbientLight(0x404040, 50)
     this.add(this.ambientLight)
 
-    const hemisphereLight = new HemisphereLight(0x4040ff, 0x202020, 0.8)
+    const hemisphereLight = new HemisphereLight(0x4040ff, 0x202020, 1)
     this.add(hemisphereLight)
 
     this.directionalLight = new DirectionalLight(0xffffff, 1.5)
@@ -236,11 +244,7 @@ export class Scene extends ThreeScene {
     this.lasers = this.lasers.filter(laser => {
       const alive = laser.update(delta)
       if (!alive) {
-        try {
-          laser.destroy(this.world)
-        } catch (err) {
-          console.warn('laser.destroy failed', err)
-        }
+        try { laser.destroy(this.world) } catch (err) { console.warn('laser.destroy failed', err) }
         if (laser.mesh.parent) laser.mesh.parent.remove(laser.mesh)
         return false
       }
@@ -251,7 +255,7 @@ export class Scene extends ThreeScene {
         for (const enemy of this.enemies) {
           if (enemy.destroyed) continue
           if (enemy.getAABB().intersectsBox(la)) {
-            // explosion + score
+            // marque le ennemi comme détruit + score + explosion
             enemy.destroyed = true
             this.addScore(100)
             try {
@@ -261,6 +265,18 @@ export class Scene extends ThreeScene {
             } catch (err) {
               console.warn('ParticleExplosion creation failed', err)
             }
+
+            // jouer le son de mort de l'ennemi (clone pour sons simultanés)
+            try {
+              if (this.enemyDeathSound) {
+                const s = this.enemyDeathSound.cloneNode(true) as HTMLAudioElement
+                try { s.currentTime = 0 } catch (e) { /* ignore */ }
+                s.play().catch(() => { /* autoplay bloqué */ })
+              }
+            } catch (err) {
+              console.warn('play enemy death sound failed', err)
+            }
+
             break
           }
         }
