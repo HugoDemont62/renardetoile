@@ -1,5 +1,3 @@
-// typescript
-// File: `src/lib/PostProcessing.ts`
 import {
   WebGLRenderer,
   Scene as ThreeScene,
