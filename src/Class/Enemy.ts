@@ -1,4 +1,4 @@
-import { Box3, BoxGeometry, Mesh, MeshBasicMaterial, Vector3 } from 'three'
+import { Box3, BoxGeometry, Mesh, MeshStandardMaterial, Vector3 } from 'three'
 import { RigidBody, RigidBodyDesc, World } from '@dimforge/rapier3d'
 
 export class Enemy {
@@ -11,7 +11,14 @@ export class Enemy {
     this.speed = speed
 
     const geom = new BoxGeometry(1.5, 1.2, 2)
-    const mat = new MeshBasicMaterial({ color: 0xff0066 })
+    // MeshStandardMaterial au lieu de MeshBasicMaterial pour réagir à la lumière
+    const mat = new MeshStandardMaterial({
+      color: 0xff0066,
+      metalness: 0.5,
+      roughness: 0.5,
+      emissive: 0x330011, // légère lumière émise (rouge sombre)
+      emissiveIntensity: 0.3
+    })
     this.mesh = new Mesh(geom, mat)
     this.mesh.position.copy(position)
     this.mesh.name = 'Enemy'

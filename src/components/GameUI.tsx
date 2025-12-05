@@ -18,12 +18,14 @@ export function GameUI({ engine }: GameUIProps) {
     const scene = new Scene(engine)
     scene.onScoreUpdate = (s) => setScore(s)
     scene.onGameOver = () => {
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
       setFinalScore(s => {
         const currentScore = score
         setGameState('gameover')
         return currentScore
       })
     }
+    // eslint-disable-next-line react-hooks/immutability
     engine.scene = scene
     engine.resize()
   }

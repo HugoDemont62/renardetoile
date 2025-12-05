@@ -1,4 +1,4 @@
-import { Box3, BoxGeometry, Mesh, MeshBasicMaterial, Vector3 } from 'three'
+import { Box3, BoxGeometry, Mesh, MeshStandardMaterial, Vector3 } from 'three'
 import { RigidBody, RigidBodyDesc, World } from '@dimforge/rapier3d'
 
 export class Laser {
@@ -9,7 +9,14 @@ export class Laser {
 
   constructor(world: World, position: Vector3, direction: Vector3, speed: number) {
     const geom = new BoxGeometry(0.15, 0.15, 0.8)
-    const mat = new MeshBasicMaterial({ color: 0x00ffff })
+    // MeshStandardMaterial avec émission pour un effet lumineux
+    const mat = new MeshStandardMaterial({
+      color: 0x00ffff,
+      emissive: 0x00ffff, // émet de la lumière cyan
+      emissiveIntensity: 2, // intensité de l'émission
+      metalness: 0.9,
+      roughness: 0.1
+    })
     this.mesh = new Mesh(geom, mat)
     this.mesh.position.copy(position)
     this.mesh.name = 'Laser'

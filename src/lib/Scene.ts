@@ -1,4 +1,14 @@
-import { Box3, BoxHelper, PerspectiveCamera, Scene as ThreeScene, Vector2, Vector3 } from 'three'
+import {
+  BoxHelper,
+  PerspectiveCamera,
+  Scene as ThreeScene,
+  Vector2,
+  Vector3,
+  AmbientLight,
+  DirectionalLight,
+  PointLight,
+  HemisphereLight
+} from 'three'
 import { Engine } from './Engine'
 import { World } from '@dimforge/rapier3d'
 import { Starship } from '../Class/Starship'
@@ -8,6 +18,8 @@ import { Laser } from '../Class/Laser'
 import { Enemy } from '../Class/Enemy'
 import { Stats } from './Stats'
 import { Debug } from './Debug'
+import { ParticleExplosion } from '../Class/ParticleExplosion'
+
 
 export class Scene extends ThreeScene {
   engine: Engine
@@ -21,6 +33,15 @@ export class Scene extends ThreeScene {
   controls: Controls
   stats: Stats
   debug: Debug
+  private explosions: ParticleExplosion[] = []
+  private gameOverPending = false
+  private gameOverPendingTimer = 0
+  private gameOverPendingDelay = 1.5
+
+  // Lumières
+  private ambientLight?: AmbientLight
+  private directionalLight?: DirectionalLight
+  private shipLight?: PointLight
 
   score = 0
   gameOver = false
@@ -46,9 +67,12 @@ export class Scene extends ThreeScene {
     this.stats = new Stats()
     this.debug = new Debug()
 
+    // Ajouter les lumières à la scène
+    this.setupLights()
+
     this.starship = new Starship(this.world, 10)
     this.add(this.starship.mesh)
-    this.starship.attachCamera(this.camera, new Vector3(0, 2, 8))
+    this.starship.attachCamera(this.camera, new Vector3(0, 4, 10))
 
     for (let i = 1; i <= 6; i++) {
       const x = (Math.random() - 0.5) * 10
@@ -58,6 +82,32 @@ export class Scene extends ThreeScene {
       this.obstacles.push(obs)
       this.add(obs.mesh)
     }
+  }
+
+  private setupLights() {
+    // 1. Lumière ambiante - éclaire tout uniformément (lumière de base)
+    this.ambientLight = new AmbientLight(0x404040, 1.5) // couleur grise douce, intensité 1.5
+    this.add(this.ambientLight)
+
+    // 2. Lumière hémisphérique - simule le ciel et le sol
+    const hemisphereLight = new HemisphereLight(
+      0x4040ff, // couleur du ciel (bleu foncé)
+      0x202020, // couleur du sol (gris très foncé)
+      0.8 // intensité
+    )
+    this.add(hemisphereLight)
+
+    // 3. Lumière directionnelle - comme le soleil, éclaire dans une direction
+    this.directionalLight = new DirectionalLight(0xffffff, 1.5)
+    this.directionalLight.position.set(5, 10, 5)
+    this.directionalLight.castShadow = false // pas d'ombres pour meilleures perfs
+    this.add(this.directionalLight)
+
+    // 4. Lumière ponctuelle qui suit le vaisseau - pour l'effet "projecteur"
+    this.shipLight = new PointLight(0x00ffff, 2, 50) // couleur cyan, intensité 2, portée 50
+    this.add(this.shipLight)
+
+    console.log('✨ Lumières ajoutées à la scène')
   }
 
   resize () {
@@ -78,6 +128,24 @@ export class Scene extends ThreeScene {
     if (this.starship && !this.starship.destroyed) {
       this.starship.update(delta, input)
 
+      // Faire suivre la lumière du vaisseau
+      if (this.shipLight) {
+        const shipPos = this.starship.getPosition()
+        this.shipLight.position.set(shipPos.x, shipPos.y + 2, shipPos.z)
+      }
+
+      // Faire suivre la lumière directionnelle (optionnel)
+      if (this.directionalLight) {
+        const shipPos = this.starship.getPosition()
+        this.directionalLight.position.set(
+          shipPos.x + 5,
+          shipPos.y + 10,
+          shipPos.z + 5
+        )
+        this.directionalLight.target.position.copy(shipPos)
+        this.directionalLight.target.updateMatrixWorld()
+      }
+
       this.distanceTraveled += delta
 
       if (this.controls.getShoot() && this.starship.canShoot()) {
@@ -86,7 +154,7 @@ export class Scene extends ThreeScene {
       }
 
       if (!this.debug.invincible && !this.debug.noClip) {
-        const shipBox = new Box3().setFromObject(this.starship.mesh)
+        const shipBox = this.starship.getCollisionAABB()
         for (const obs of this.obstacles) {
           const obsBox = obs.getAABB()
           if (shipBox.intersectsBox(obsBox)) {
@@ -118,13 +186,32 @@ export class Scene extends ThreeScene {
         if (enemy.destroyed) continue
         const enemyBox = enemy.getAABB()
         if (laserBox.intersectsBox(enemyBox)) {
+          const enemyPos = enemy.getPosition().clone()
           enemy.destroy(this.world)
+
+          // créer l'explosion en passant la Scene (this) et non le World
+          const explosion = new ParticleExplosion(this, enemyPos, 5)
+          this.explosions.push(explosion)
+          this.add(explosion.mesh)
+
           laser.destroy(this.world)
           this.addScore(10)
           return false
         }
       }
 
+      return true
+    })
+
+    // mettre à jour les explosions et supprimer les terminées
+    this.explosions = this.explosions.filter(ex => {
+      const alive = ex.update(delta)
+      if (!alive) {
+        // appeler destroy sans passer this.world
+        ex.destroy()
+        if (ex.mesh.parent === this) this.remove(ex.mesh)
+        return false
+      }
       return true
     })
 
@@ -166,6 +253,16 @@ export class Scene extends ThreeScene {
       },
       this.starship?.getPosition()
     )
+    if (this.gameOverPending) {
+      this.gameOverPendingTimer += delta
+      if (this.gameOverPendingTimer >= this.gameOverPendingDelay) {
+        this.gameOverPending = false
+        this.gameOver = true
+        if (this.onGameOver) {
+          this.onGameOver()
+        }
+      }
+    }
 
     this.engine.renderer.render(this, this.camera)
   }
@@ -227,11 +324,23 @@ export class Scene extends ThreeScene {
   }
 
   private handleGameOver() {
-    this.gameOver = true
-    this.starship?.destroy(this.world)
-    if (this.onGameOver) {
-      this.onGameOver()
+    // éviter les doubles appels
+    if (this.gameOverPending || this.gameOver) return
+
+    if (this.starship) {
+      const shipPos = this.starship.getPosition().clone()
+      // créer explosion du vaisseau
+      const explosion = new ParticleExplosion(this, shipPos, 8)
+      this.explosions.push(explosion)
+      this.add(explosion.mesh)
     }
+
+    // détruire le vaisseau pour couper le contrôle immédiatement
+    this.starship?.destroy(this.world)
+
+    // marquer la fin comme "en attente" pour laisser le temps aux effets de se jouer
+    this.gameOverPending = true
+    this.gameOverPendingTimer = 0
   }
 
   dispose () {
@@ -241,6 +350,14 @@ export class Scene extends ThreeScene {
     this.lasers.forEach(l => l.destroy(this.world))
     this.enemies.forEach(e => e.destroy(this.world))
     this.obstacles.forEach(o => o.destroy(this.world))
+
+    this.explosions.forEach(ex => {
+      // appeler destroy sans passer this.world
+      ex.destroy()
+      if (ex.mesh.parent === this) this.remove(ex.mesh)
+    })
+    this.explosions = []
+
     this.clearHitboxes()
   }
 }
