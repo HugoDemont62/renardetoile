@@ -1,33 +1,49 @@
-import { WebGLRenderer, Scene, PerspectiveCamera, Vector2 } from 'three'
-import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer'
-import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass'
-import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass'
+import {
+  WebGLRenderer,
+  Scene as ThreeScene,
+  PerspectiveCamera,
+  OrthographicCamera,
+  WebGLRenderTarget,
+  Vector2,
+  PlaneGeometry,
+  Mesh,
+  ShaderMaterial,
+  NearestFilter,
+  RGBAFormat
+} from 'three'
 
 export class PostProcessing {
-  composer: EffectComposer
-  private renderPass: RenderPass
-  private pixelPass: ShaderPass
+  private renderer: WebGLRenderer
+  private rt: WebGLRenderTarget
+  private quadScene: ThreeScene
+  private quadCamera: OrthographicCamera
+  private quad: Mesh
   private resolution = new Vector2(1, 1)
 
-  constructor(renderer: WebGLRenderer, pixelSize = 6) {
-    this.composer = new EffectComposer(renderer)
+  constructor(renderer: WebGLRenderer, private pixelSize = 6) {
+    this.renderer = renderer
 
-    // RenderPass initial (sera réutilisé et mis à jour chaque frame)
-    this.renderPass = new RenderPass(new Scene(), new PerspectiveCamera())
-    this.composer.addPass(this.renderPass)
+    this.rt = new WebGLRenderTarget(1, 1, {
+      minFilter: NearestFilter,
+      magFilter: NearestFilter,
+      format: RGBAFormat
+    })
 
-    // Shader de pixelation
-    const PixelShader = {
+    // scene + camera pour le quad fullscreen
+    this.quadScene = new ThreeScene()
+    this.quadCamera = new OrthographicCamera(-1, 1, 1, -1, 0, 1)
+
+    const material = new ShaderMaterial({
       uniforms: {
-        tDiffuse: { value: null },
-        pixelSize: { value: pixelSize },
+        tDiffuse: { value: null as any }, // texture défini au runtime (typed via three internals)
+        pixelSize: { value: this.pixelSize },
         resolution: { value: this.resolution }
       },
       vertexShader: `
         varying vec2 vUv;
         void main() {
           vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          gl_Position = vec4(position.xy, 0.0, 1.0);
         }
       `,
       fragmentShader: `
@@ -36,52 +52,67 @@ export class PostProcessing {
         uniform vec2 resolution;
         varying vec2 vUv;
         void main() {
-          vec2 d = pixelSize / resolution;
-          vec2 uv = floor(vUv / d) * d + (d * 0.5); // centre du "pixel"
-          gl_FragColor = texture2D(tDiffuse, uv);
+          vec2 px = pixelSize / resolution;
+          // centrer l'échantillon dans le bloc
+          vec2 coord = floor(vUv / px) * px + px * 0.5;
+          gl_FragColor = texture2D(tDiffuse, coord);
         }
       `
-    }
+    })
 
-    this.pixelPass = new ShaderPass(PixelShader as any)
-    this.pixelPass.renderToScreen = true
-    this.composer.addPass(this.pixelPass)
+    this.quad = new Mesh(new PlaneGeometry(2, 2), material)
+    this.quadScene.add(this.quad)
   }
 
-  render(threeScene: Scene, camera: PerspectiveCamera) {
-    // mettre à jour le RenderPass existant (évite de recréer et d'introduire des erreurs)
-    this.renderPass.scene = threeScene as any
-    this.renderPass.camera = camera as any
+  render(scene: ThreeScene, camera: PerspectiveCamera): void {
+    // rendu de la scène dans le render target
+    try {
+      this.renderer.setRenderTarget(this.rt)
+      this.renderer.render(scene, camera)
+      this.renderer.setRenderTarget(null)
 
-    // mettre à jour uniforms si besoin
-    const uniforms: any = (this.pixelPass.uniforms as any)
-    if (uniforms.resolution && uniforms.resolution.value instanceof Vector2) {
-      // resolution est déjà référencée -- s'assurer qu'elle contient la bonne taille
-      // size est mis à jour via setSize mais on peut recaler depuis le composer.domElement
-      const dom = this.composer.renderer.domElement
-      uniforms.resolution.value.set(dom.width || dom.clientWidth, dom.height || dom.clientHeight)
-    }
-    if (uniforms.pixelSize) {
-      // pixelSize reste configurable via setPixelSize
-    }
+      // fournir la texture au shader puis dessiner le quad
+      const mat = this.quad.material as ShaderMaterial
+      mat.uniforms.tDiffuse.value = this.rt.texture
+      mat.uniforms.pixelSize.value = this.pixelSize
+      mat.uniforms.resolution.value = this.resolution
 
-    this.composer.render()
+      this.renderer.render(this.quadScene, this.quadCamera)
+    } catch (err) {
+      console.warn('PostProcessing.render failed', err)
+    }
   }
 
-  setSize(w: number, h: number) {
-    this.composer.setSize(w, h)
+  setSize(w: number, h: number): void {
+    this.renderer.getSize(this.resolution) // met à jour interne si besoin
+    this.rt.setSize(Math.max(1, Math.floor(w)), Math.max(1, Math.floor(h)))
     this.resolution.set(w, h)
-    // mettre à jour uniform resolution immédiatement
-    const uniforms: any = (this.pixelPass.uniforms as any)
-    if (uniforms.resolution) uniforms.resolution.value.set(w, h)
+    const mat = this.quad.material as ShaderMaterial
+    mat.uniforms.resolution.value = this.resolution
   }
 
-  setPixelSize(value: number) {
-    const uniforms: any = (this.pixelPass.uniforms as any)
-    if (uniforms.pixelSize) uniforms.pixelSize.value = value
+  setPixelSize(value: number): void {
+    this.pixelSize = Math.max(1, value)
+    const mat = this.quad.material as ShaderMaterial
+    mat.uniforms.pixelSize.value = this.pixelSize
   }
 
-  dispose() {
-    try { this.composer.dispose() } catch {}
+  dispose(): void {
+    try {
+      this.rt.dispose()
+    } catch (err) {
+      console.warn('PostProcessing.dispose: rt.dispose failed', err)
+    }
+    try {
+      this.quad.geometry.dispose()
+    } catch (err) {
+      console.warn('PostProcessing.dispose: geometry.dispose failed', err)
+    }
+    try {
+      const mat = this.quad.material as ShaderMaterial
+      mat.dispose()
+    } catch (err) {
+      console.warn('PostProcessing.dispose: material.dispose failed', err)
+    }
   }
 }
