@@ -1,3 +1,5 @@
+// typescript
+// File: `src/lib/PostProcessing.ts`
 import {
   WebGLRenderer,
   Scene as ThreeScene,
@@ -9,7 +11,8 @@ import {
   Mesh,
   ShaderMaterial,
   NearestFilter,
-  RGBAFormat
+  RGBAFormat,
+  Texture
 } from 'three'
 
 export class PostProcessing {
@@ -19,9 +22,11 @@ export class PostProcessing {
   private quadCamera: OrthographicCamera
   private quad: Mesh
   private resolution = new Vector2(1, 1)
+  private pixelSize = 6
 
-  constructor(renderer: WebGLRenderer, private pixelSize = 6) {
+  constructor(renderer: WebGLRenderer, pixelSize = 6) {
     this.renderer = renderer
+    this.pixelSize = pixelSize
 
     this.rt = new WebGLRenderTarget(1, 1, {
       minFilter: NearestFilter,
@@ -35,7 +40,7 @@ export class PostProcessing {
 
     const material = new ShaderMaterial({
       uniforms: {
-        tDiffuse: { value: null as any }, // texture défini au runtime (typed via three internals)
+        tDiffuse: { value: null as Texture | null }, // typed, pas d'any
         pixelSize: { value: this.pixelSize },
         resolution: { value: this.resolution }
       },
@@ -53,7 +58,6 @@ export class PostProcessing {
         varying vec2 vUv;
         void main() {
           vec2 px = pixelSize / resolution;
-          // centrer l'échantillon dans le bloc
           vec2 coord = floor(vUv / px) * px + px * 0.5;
           gl_FragColor = texture2D(tDiffuse, coord);
         }
@@ -65,13 +69,13 @@ export class PostProcessing {
   }
 
   render(scene: ThreeScene, camera: PerspectiveCamera): void {
-    // rendu de la scène dans le render target
     try {
+      // render scene into render target
       this.renderer.setRenderTarget(this.rt)
       this.renderer.render(scene, camera)
       this.renderer.setRenderTarget(null)
 
-      // fournir la texture au shader puis dessiner le quad
+      // provide texture + params to shader and draw full-screen quad
       const mat = this.quad.material as ShaderMaterial
       mat.uniforms.tDiffuse.value = this.rt.texture
       mat.uniforms.pixelSize.value = this.pixelSize
@@ -84,7 +88,7 @@ export class PostProcessing {
   }
 
   setSize(w: number, h: number): void {
-    this.renderer.getSize(this.resolution) // met à jour interne si besoin
+    // update render target and uniforms
     this.rt.setSize(Math.max(1, Math.floor(w)), Math.max(1, Math.floor(h)))
     this.resolution.set(w, h)
     const mat = this.quad.material as ShaderMaterial
@@ -98,16 +102,8 @@ export class PostProcessing {
   }
 
   dispose(): void {
-    try {
-      this.rt.dispose()
-    } catch (err) {
-      console.warn('PostProcessing.dispose: rt.dispose failed', err)
-    }
-    try {
-      this.quad.geometry.dispose()
-    } catch (err) {
-      console.warn('PostProcessing.dispose: geometry.dispose failed', err)
-    }
+    try { this.rt.dispose() } catch (err) { console.warn('PostProcessing.dispose: rt.dispose failed', err) }
+    try { this.quad.geometry.dispose() } catch (err) { console.warn('PostProcessing.dispose: geometry.dispose failed', err) }
     try {
       const mat = this.quad.material as ShaderMaterial
       mat.dispose()
