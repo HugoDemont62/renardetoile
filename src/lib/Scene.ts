@@ -20,6 +20,11 @@ import { Obstacle } from '../Class/Obstacle'
 import { Controls } from './Controls'
 import { Laser } from '../Class/Laser'
 import { Enemy } from '../Class/Enemy'
+import { EnemyShooter } from '../Class/EnemyShooter'
+import { EnemyLaser } from '../Class/EnemyLaser'
+import { PowerUp } from '../Class/PowerUp'
+import type { PowerUpType } from '../Class/PowerUp'
+import { EngineTrail } from '../Class/EngineTrail'
 import { Stats } from './Stats'
 import { Debug } from './Debug'
 import { ParticleExplosion } from '../Class/ParticleExplosion'
@@ -35,10 +40,14 @@ export class Scene extends ThreeScene {
   obstacles: Obstacle[] = []
   lasers: Laser[] = []
   enemies: Enemy[] = []
+  enemyShooters: EnemyShooter[] = []
+  enemyLasers: EnemyLaser[] = []
+  powerUps: PowerUp[] = []
   controls: Controls
   stats: Stats
   debug: Debug
   private explosions: ParticleExplosion[] = []
+  private engineTrail?: EngineTrail
   private gameOverPending = false
   private gameOverPendingTimer = 0
   private gameOverPendingDelay = 1.5
@@ -47,15 +56,43 @@ export class Scene extends ThreeScene {
   private directionalLight?: DirectionalLight
   private shipLight?: PointLight
 
+  // Système de vies et shield
+  lives = 3
+  maxLives = 5
+  shieldActive = false
+  shieldTimer = 0
+  shieldDuration = 5
+  invincibilityTimer = 0
+  invincibilityDuration = 2
+
+  // Système de combo
+  combo = 1
+  maxCombo = 10
+  comboTimer = 0
+  comboDuration = 3
+
+  // Système de tir rapide
+  rapidFireActive = false
+  rapidFireTimer = 0
+  rapidFireDuration = 8
+
   score = 0
   gameOver = false
   private spawnTimer = 0
   private spawnInterval = 2
+  private powerUpSpawnTimer = 0
+  private powerUpSpawnInterval = 15
+  private difficultyTimer = 0
+  private difficultyLevel = 1
   private distanceTraveled = 0
   private hitboxHelpers: BoxHelper[] = []
 
   onScoreUpdate?: (score: number) => void
   onGameOver?: () => void
+  onLivesUpdate?: (lives: number) => void
+  onComboUpdate?: (combo: number) => void
+  onShieldUpdate?: (active: boolean, timeLeft: number) => void
+  onRapidFireUpdate?: (active: boolean, timeLeft: number) => void
 
   private deathSound?: HTMLAudioElement
   private enemyDeathSound?: HTMLAudioElement
@@ -111,6 +148,9 @@ export class Scene extends ThreeScene {
     this.starship = new Starship(this.world, 10)
     this.add(this.starship.mesh)
     this.starship.attachCamera(this.camera, new Vector3(0, 4, 10))
+
+    // Création de la trainée du moteur
+    this.engineTrail = new EngineTrail(this, 80)
   }
 
   private generateWorld() {
@@ -195,13 +235,25 @@ export class Scene extends ThreeScene {
 
     const input = this.controls.getInput()
 
+    // Update timers
+    this.updateTimers(delta)
+
     if (this.starship && !this.starship.destroyed) {
       this.starship.update(delta, input)
+
+      // Update engine trail
+      if (this.engineTrail) {
+        const shipPos = this.starship.getPosition()
+        const shipForward = this.starship.getForward().negate() // Inverse pour trainée arrière
+        this.engineTrail.update(delta, shipPos, shipForward)
+      }
 
       // suivre la lumière du vaisseau
       if (this.shipLight) {
         const sp = this.starship.getPosition()
         this.shipLight.position.set(sp.x, sp.y + 2, sp.z + 6)
+        // Couleur cyan ou dorée si shield actif
+        this.shipLight.color.set(this.shieldActive ? 0xffff00 : 0x00ffff)
       }
 
       if (this.directionalLight) {
@@ -211,81 +263,29 @@ export class Scene extends ThreeScene {
 
       this.distanceTraveled += delta
 
-      if (this.controls.getShoot() && this.starship.canShoot()) {
+      // Tir (avec rapidfire)
+      const canShoot = this.rapidFireActive ? true : this.starship.canShoot()
+      if (this.controls.getShoot() && canShoot) {
         this.shoot()
-        this.starship.resetShootCooldown()
-      }
-
-      // collisions vaisseau <-> ennemis / obstacles
-      if (!this.debug.invincible && !this.debug.noClip) {
-        try {
-          const shipBox = this.starship.getCollisionAABB()
-          for (const enemy of this.enemies) {
-            if (enemy.destroyed) continue
-            if (enemy.getAABB().intersectsBox(shipBox)) {
-              this.handleGameOver()
-              break
-            }
-          }
-
-          for (const obs of this.obstacles) {
-            if (obs.mesh && obs.getAABB().intersectsBox(shipBox)) {
-              this.handleGameOver()
-              break
-            }
-          }
-        } catch (err) {
-          console.warn('Collision checks failed', err)
+        if (!this.rapidFireActive) {
+          this.starship.resetShootCooldown()
         }
       }
+
+      // collisions vaisseau <-> ennemis / obstacles / enemy lasers
+      if (!this.debug.invincible && !this.debug.noClip && this.invincibilityTimer <= 0) {
+        this.checkPlayerCollisions()
+      }
+
+      // Collision avec power-ups
+      this.checkPowerUpCollisions()
     }
 
     // lasers update + collisions
-    this.lasers = this.lasers.filter(laser => {
-      const alive = laser.update(delta)
-      if (!alive) {
-        try { laser.destroy(this.world) } catch (err) { console.warn('laser.destroy failed', err) }
-        if (laser.mesh.parent) laser.mesh.parent.remove(laser.mesh)
-        return false
-      }
+    this.updateLasers(delta)
 
-      // collisions laser <-> enemy
-      try {
-        const la = laser.getAABB()
-        for (const enemy of this.enemies) {
-          if (enemy.destroyed) continue
-          if (enemy.getAABB().intersectsBox(la)) {
-            // marque le ennemi comme détruit + score + explosion
-            enemy.destroyed = true
-            this.addScore(100)
-            try {
-              const ex = new ParticleExplosion(this, enemy.getPosition(), 2)
-              this.explosions.push(ex)
-              this.add(ex.mesh)
-            } catch (err) {
-              console.warn('ParticleExplosion creation failed', err)
-            }
-
-            // jouer le son de mort de l'ennemi (clone pour sons simultanés)
-            try {
-              if (this.enemyDeathSound) {
-                const s = this.enemyDeathSound.cloneNode(true) as HTMLAudioElement
-                try { s.currentTime = 0 } catch (e) { /* ignore */ }
-                s.play().catch(() => { /* autoplay bloqué */ })
-              }
-            } catch (err) {
-              console.warn('play enemy death sound failed', err)
-            }
-
-            break
-          }
-        }
-      } catch (err) {
-        console.warn('Laser collision check failed', err)
-      }
-
-      return true
-    })
+    // Enemy lasers update
+    this.updateEnemyLasers(delta)
 
     // explosions update
     this.explosions = this.explosions.filter(ex => {
@@ -298,46 +298,19 @@ export class Scene extends ThreeScene {
     })
 
     // update ennemis
-    for (const enemy of this.enemies) {
-      if (!enemy.destroyed) {
-        try {
-          enemy.update(delta, this.starship?.getPosition())
-          // sync mesh with body translation if needed (enemy handles it)
-        } catch (err) {
-          console.warn('Enemy update failed', err)
-        }
-      }
-    }
+    this.updateEnemies(delta)
 
-    // créer explosion pour ennemis détruits non encore traités (sécurité)
-    for (const enemy of this.enemies) {
-      if (enemy.destroyed && !this.processedDestroyed.has(enemy)) {
-        try {
-          const ex = new ParticleExplosion(this, enemy.getPosition(), 2)
-          this.explosions.push(ex)
-          this.add(ex.mesh)
-        } catch (err) {
-          console.warn('ParticleExplosion creation failed (post-destroy)', err)
-        }
-        this.processedDestroyed.add(enemy)
-      }
-    }
+    // Update enemy shooters
+    this.updateEnemyShooters(delta)
 
-    // nettoyer ennemis détruits
-    this.enemies = this.enemies.filter(e => {
-      if (e.destroyed) {
-        try { e.destroy(this.world) } catch (err) { console.warn('removeRigidBody failed (enemy)', err) }
-        return false
-      }
-      return true
-    })
+    // Update power-ups
+    this.updatePowerUps(delta)
 
-    // spawn
-    this.spawnTimer += delta
-    if (this.spawnTimer >= this.spawnInterval) {
-      this.spawnTimer = 0
-      this.spawnEnemy()
-    }
+    // spawn enemies and power-ups
+    this.handleSpawning(delta)
+
+    // Difficulty progression
+    this.updateDifficulty(delta)
 
     // retirer obstacles trop loins
     this.obstacles.forEach(obs => {
@@ -354,7 +327,7 @@ export class Scene extends ThreeScene {
     }
 
     this.stats.update(
-      { lasers: this.lasers.length, enemies: this.enemies.length, obstacles: this.obstacles.length },
+      { lasers: this.lasers.length, enemies: this.enemies.length + this.enemyShooters.length, obstacles: this.obstacles.length },
       this.starship?.getPosition()
     )
 
@@ -369,6 +342,368 @@ export class Scene extends ThreeScene {
     this.engine.render(this, this.camera)
   }
 
+  private updateTimers(delta: number) {
+    // Shield timer
+    if (this.shieldActive) {
+      this.shieldTimer -= delta
+      if (this.onShieldUpdate) this.onShieldUpdate(true, this.shieldTimer)
+      if (this.shieldTimer <= 0) {
+        this.shieldActive = false
+        if (this.onShieldUpdate) this.onShieldUpdate(false, 0)
+      }
+    }
+
+    // Rapid fire timer
+    if (this.rapidFireActive) {
+      this.rapidFireTimer -= delta
+      if (this.onRapidFireUpdate) this.onRapidFireUpdate(true, this.rapidFireTimer)
+      if (this.rapidFireTimer <= 0) {
+        this.rapidFireActive = false
+        if (this.onRapidFireUpdate) this.onRapidFireUpdate(false, 0)
+      }
+    }
+
+    // Combo timer
+    if (this.combo > 1) {
+      this.comboTimer -= delta
+      if (this.comboTimer <= 0) {
+        this.combo = 1
+        if (this.onComboUpdate) this.onComboUpdate(this.combo)
+      }
+    }
+
+    // Invincibility timer (après avoir pris des dégâts)
+    if (this.invincibilityTimer > 0) {
+      this.invincibilityTimer -= delta
+      // Effet de clignotement
+      if (this.starship) {
+        this.starship.mesh.visible = Math.floor(this.invincibilityTimer * 10) % 2 === 0
+      }
+    } else if (this.starship) {
+      this.starship.mesh.visible = true
+    }
+  }
+
+  private checkPlayerCollisions() {
+    if (!this.starship || this.starship.destroyed) return
+
+    try {
+      const shipBox = this.starship.getCollisionAABB()
+
+      // Collision avec ennemis normaux
+      for (const enemy of this.enemies) {
+        if (enemy.destroyed) continue
+        if (enemy.getAABB().intersectsBox(shipBox)) {
+          this.handleDamage()
+          enemy.destroyed = true
+          return
+        }
+      }
+
+      // Collision avec enemy shooters
+      for (const shooter of this.enemyShooters) {
+        if (shooter.destroyed) continue
+        if (shooter.getAABB().intersectsBox(shipBox)) {
+          this.handleDamage()
+          shooter.destroyed = true
+          return
+        }
+      }
+
+      // Collision avec obstacles
+      for (const obs of this.obstacles) {
+        if (obs.mesh && obs.getAABB().intersectsBox(shipBox)) {
+          this.handleDamage()
+          return
+        }
+      }
+
+      // Collision avec enemy lasers
+      for (const laser of this.enemyLasers) {
+        if (laser.getAABB().intersectsBox(shipBox)) {
+          this.handleDamage()
+          try { laser.destroy(this.world) } catch { /* ignore */ }
+          this.enemyLasers = this.enemyLasers.filter(l => l !== laser)
+          return
+        }
+      }
+    } catch (err) {
+      console.warn('Collision checks failed', err)
+    }
+  }
+
+  private checkPowerUpCollisions() {
+    if (!this.starship || this.starship.destroyed) return
+
+    const shipBox = this.starship.getCollisionAABB()
+
+    this.powerUps = this.powerUps.filter(powerUp => {
+      if (powerUp.destroyed) return false
+
+      if (powerUp.getAABB().intersectsBox(shipBox)) {
+        this.collectPowerUp(powerUp.type)
+        powerUp.destroy(this.world)
+        return false
+      }
+      return true
+    })
+  }
+
+  private collectPowerUp(type: PowerUpType) {
+    switch (type) {
+      case 'health':
+        if (this.lives < this.maxLives) {
+          this.lives++
+          if (this.onLivesUpdate) this.onLivesUpdate(this.lives)
+        }
+        break
+      case 'rapidfire':
+        this.rapidFireActive = true
+        this.rapidFireTimer = this.rapidFireDuration
+        if (this.onRapidFireUpdate) this.onRapidFireUpdate(true, this.rapidFireTimer)
+        break
+      case 'shield':
+        this.shieldActive = true
+        this.shieldTimer = this.shieldDuration
+        if (this.onShieldUpdate) this.onShieldUpdate(true, this.shieldTimer)
+        break
+      case 'score':
+        this.addScore(500)
+        break
+    }
+  }
+
+  private handleDamage() {
+    if (this.shieldActive) {
+      // Shield absorbe le dégât
+      this.shieldActive = false
+      this.shieldTimer = 0
+      if (this.onShieldUpdate) this.onShieldUpdate(false, 0)
+      // Petit effet visuel
+      if (this.starship) {
+        try {
+          const ex = new ParticleExplosion(this, this.starship.getPosition(), 1)
+          this.explosions.push(ex)
+        } catch { /* ignore */ }
+      }
+      return
+    }
+
+    this.lives--
+    if (this.onLivesUpdate) this.onLivesUpdate(this.lives)
+
+    // Reset combo
+    this.combo = 1
+    if (this.onComboUpdate) this.onComboUpdate(this.combo)
+
+    if (this.lives <= 0) {
+      this.handleGameOver()
+    } else {
+      // Invincibilité temporaire
+      this.invincibilityTimer = this.invincibilityDuration
+
+      // Son de dégât
+      try {
+        if (this.deathSound) {
+          const s = this.deathSound.cloneNode(true) as HTMLAudioElement
+          s.volume = 0.5
+          s.play().catch(() => { /* ignore */ })
+        }
+      } catch { /* ignore */ }
+    }
+  }
+
+  private updateLasers(delta: number) {
+    this.lasers = this.lasers.filter(laser => {
+      const alive = laser.update(delta)
+      if (!alive) {
+        try { laser.destroy(this.world) } catch (err) { console.warn('laser.destroy failed', err) }
+        if (laser.mesh.parent) laser.mesh.parent.remove(laser.mesh)
+        return false
+      }
+
+      // collisions laser <-> enemy
+      try {
+        const la = laser.getAABB()
+
+        // Check normal enemies
+        for (const enemy of this.enemies) {
+          if (enemy.destroyed) continue
+          if (enemy.getAABB().intersectsBox(la)) {
+            enemy.destroyed = true
+            this.handleEnemyKill(enemy.getPosition(), 100)
+            return false
+          }
+        }
+
+        // Check enemy shooters (more points)
+        for (const shooter of this.enemyShooters) {
+          if (shooter.destroyed) continue
+          if (shooter.getAABB().intersectsBox(la)) {
+            shooter.destroyed = true
+            this.handleEnemyKill(shooter.getPosition(), 200)
+            return false
+          }
+        }
+      } catch (err) {
+        console.warn('Laser collision check failed', err)
+      }
+
+      return true
+    })
+  }
+
+  private handleEnemyKill(position: Vector3, basePoints: number) {
+    // Increase combo
+    this.comboTimer = this.comboDuration
+    const points = basePoints * this.combo
+    this.addScore(points)
+
+    if (this.combo < this.maxCombo) {
+      this.combo++
+      if (this.onComboUpdate) this.onComboUpdate(this.combo)
+    }
+
+    // Explosion
+    try {
+      const ex = new ParticleExplosion(this, position, 2)
+      this.explosions.push(ex)
+      this.add(ex.mesh)
+    } catch (err) {
+      console.warn('ParticleExplosion creation failed', err)
+    }
+
+    // Son
+    try {
+      if (this.enemyDeathSound) {
+        const s = this.enemyDeathSound.cloneNode(true) as HTMLAudioElement
+        s.play().catch(() => { /* ignore */ })
+      }
+    } catch { /* ignore */ }
+  }
+
+  private updateEnemyLasers(delta: number) {
+    this.enemyLasers = this.enemyLasers.filter(laser => {
+      const alive = laser.update(delta)
+      if (!alive) {
+        try { laser.destroy(this.world) } catch { /* ignore */ }
+        return false
+      }
+      return true
+    })
+  }
+
+  private updateEnemies(delta: number) {
+    for (const enemy of this.enemies) {
+      if (!enemy.destroyed) {
+        try {
+          enemy.update(delta, this.starship?.getPosition())
+        } catch (err) {
+          console.warn('Enemy update failed', err)
+        }
+      }
+    }
+
+    // créer explosion pour ennemis détruits non encore traités
+    for (const enemy of this.enemies) {
+      if (enemy.destroyed && !this.processedDestroyed.has(enemy)) {
+        this.processedDestroyed.add(enemy)
+      }
+    }
+
+    // nettoyer ennemis détruits
+    this.enemies = this.enemies.filter(e => {
+      if (e.destroyed) {
+        try { e.destroy(this.world) } catch (err) { console.warn('removeRigidBody failed (enemy)', err) }
+        return false
+      }
+      return true
+    })
+  }
+
+  private updateEnemyShooters(delta: number) {
+    for (const shooter of this.enemyShooters) {
+      if (!shooter.destroyed) {
+        try {
+          shooter.update(delta, this.starship?.getPosition())
+
+          // Create laser if shooter wants to shoot
+          if (shooter.canShootLaser) {
+            const laserPos = shooter.getPosition()
+            const enemyLaser = new EnemyLaser(this.world, laserPos, shooter.lastShootDirection, 25)
+            this.enemyLasers.push(enemyLaser)
+            this.add(enemyLaser.mesh)
+          }
+        } catch (err) {
+          console.warn('EnemyShooter update failed', err)
+        }
+      }
+    }
+
+    // Cleanup destroyed shooters
+    this.enemyShooters = this.enemyShooters.filter(s => {
+      if (s.destroyed) {
+        try { s.destroy(this.world) } catch { /* ignore */ }
+        return false
+      }
+      return true
+    })
+  }
+
+  private updatePowerUps(delta: number) {
+    this.powerUps.forEach(p => p.update(delta))
+
+    // Remove power-ups too far behind
+    if (this.starship) {
+      const shipZ = this.starship.getPosition().z
+      this.powerUps = this.powerUps.filter(p => {
+        if (p.mesh.position.z > shipZ + 30) {
+          p.destroy(this.world)
+          return false
+        }
+        return true
+      })
+    }
+  }
+
+  private handleSpawning(delta: number) {
+    // Enemy spawning
+    this.spawnTimer += delta
+    if (this.spawnTimer >= this.spawnInterval) {
+      this.spawnTimer = 0
+
+      // Random: normal enemy or shooter based on difficulty
+      const shooterChance = Math.min(0.1 + this.difficultyLevel * 0.05, 0.5)
+      if (Math.random() < shooterChance) {
+        this.spawnEnemyShooter()
+      } else {
+        this.spawnEnemy()
+      }
+    }
+
+    // Power-up spawning
+    this.powerUpSpawnTimer += delta
+    if (this.powerUpSpawnTimer >= this.powerUpSpawnInterval) {
+      this.powerUpSpawnTimer = 0
+      this.spawnPowerUp()
+    }
+  }
+
+  private updateDifficulty(delta: number) {
+    this.difficultyTimer += delta
+
+    // Increase difficulty every 30 seconds
+    const newLevel = Math.floor(this.difficultyTimer / 30) + 1
+    if (newLevel > this.difficultyLevel) {
+      this.difficultyLevel = newLevel
+
+      // Reduce spawn interval (more enemies)
+      this.spawnInterval = Math.max(0.8, 2 - this.difficultyLevel * 0.15)
+
+      console.log(`🎮 Difficulté augmentée: niveau ${this.difficultyLevel}`)
+    }
+  }
+
   private updateHitboxes() {
     this.clearHitboxes()
 
@@ -381,6 +716,14 @@ export class Scene extends ThreeScene {
     this.enemies.forEach(enemy => {
       if (!enemy.destroyed) {
         const helper = new BoxHelper(enemy.mesh, 0xff0000)
+        this.hitboxHelpers.push(helper)
+        this.add(helper)
+      }
+    })
+
+    this.enemyShooters.forEach(shooter => {
+      if (!shooter.destroyed) {
+        const helper = new BoxHelper(shooter.mesh, 0xff6600)
         this.hitboxHelpers.push(helper)
         this.add(helper)
       }
@@ -406,6 +749,23 @@ export class Scene extends ThreeScene {
     const laser = new Laser(this.world, pos, dir, 40)
     this.lasers.push(laser)
     this.add(laser.mesh)
+
+    // Double shot when rapidfire is active
+    if (this.rapidFireActive) {
+      const pos2 = this.starship.getPosition()
+      pos2.z -= 2
+      pos2.x += 0.8
+      const laser2 = new Laser(this.world, pos2, dir, 40)
+      this.lasers.push(laser2)
+      this.add(laser2.mesh)
+
+      const pos3 = this.starship.getPosition()
+      pos3.z -= 2
+      pos3.x -= 0.8
+      const laser3 = new Laser(this.world, pos3, dir, 40)
+      this.lasers.push(laser3)
+      this.add(laser3.mesh)
+    }
   }
 
   private spawnEnemy() {
@@ -413,9 +773,47 @@ export class Scene extends ThreeScene {
     const x = (Math.random() - 0.5) * 20
     const y = Math.random() * 8 + 2
     const z = this.starship.getPosition().z - 50
-    const enemy = new Enemy(this.world, new Vector3(x, y, z), 8)
+    // Speed increases with difficulty
+    const speed = 8 + this.difficultyLevel * 1.5
+    const enemy = new Enemy(this.world, new Vector3(x, y, z), speed)
     this.enemies.push(enemy)
     this.add(enemy.mesh)
+  }
+
+  private spawnEnemyShooter() {
+    if (!this.starship) return
+    const x = (Math.random() - 0.5) * 18
+    const y = Math.random() * 6 + 3
+    const z = this.starship.getPosition().z - 55
+    const speed = 6 + this.difficultyLevel
+    const shooter = new EnemyShooter(this.world, new Vector3(x, y, z), speed)
+    this.enemyShooters.push(shooter)
+    this.add(shooter.mesh)
+  }
+
+  private spawnPowerUp() {
+    if (!this.starship) return
+    const x = (Math.random() - 0.5) * 16
+    const y = Math.random() * 6 + 2
+    const z = this.starship.getPosition().z - 40
+
+    // Random type with weighted probability
+    const types: PowerUpType[] = ['health', 'rapidfire', 'shield', 'score']
+    const weights = [0.3, 0.25, 0.2, 0.25]
+    const r = Math.random()
+    let cumulative = 0
+    let type: PowerUpType = 'score'
+    for (let i = 0; i < types.length; i++) {
+      cumulative += weights[i]
+      if (r <= cumulative) {
+        type = types[i]
+        break
+      }
+    }
+
+    const powerUp = new PowerUp(this.world, new Vector3(x, y, z), type)
+    this.powerUps.push(powerUp)
+    this.add(powerUp.mesh)
   }
 
   private addScore(points: number) {
@@ -462,19 +860,36 @@ export class Scene extends ThreeScene {
     this.lasers.forEach(l => {
       try { l.destroy(this.world) } catch (err) { console.warn('laser.destroy failed during dispose', err) }
     })
+    this.enemyLasers.forEach(l => {
+      try { l.destroy(this.world) } catch (err) { console.warn('enemyLaser.destroy failed during dispose', err) }
+    })
     this.enemies.forEach(e => {
       try { e.destroy(this.world) } catch (err) { console.warn('enemy.destroy failed during dispose', err) }
+    })
+    this.enemyShooters.forEach(s => {
+      try { s.destroy(this.world) } catch (err) { console.warn('enemyShooter.destroy failed during dispose', err) }
+    })
+    this.powerUps.forEach(p => {
+      try { p.destroy(this.world) } catch (err) { console.warn('powerUp.destroy failed during dispose', err) }
     })
     this.obstacles.forEach(o => {
       try { o.destroy(this.world) } catch (err) { console.warn('obstacle.destroy failed during dispose', err) }
     })
 
     this.lasers = []
+    this.enemyLasers = []
     this.enemies = []
+    this.enemyShooters = []
+    this.powerUps = []
     this.obstacles = []
     this.explosions.forEach(ex => ex.destroy())
     this.explosions = []
     this.processedDestroyed.clear()
+
+    // Destroy engine trail
+    if (this.engineTrail) {
+      this.engineTrail.destroy()
+    }
 
     // remove all children and dispose resources safely
     while (this.children.length) {
