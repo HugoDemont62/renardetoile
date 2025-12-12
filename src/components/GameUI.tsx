@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Engine } from '../lib/Engine'
 import { Scene } from '../lib/Scene'
 
@@ -12,10 +12,18 @@ export function GameUI({ engine }: GameUIProps) {
   const [finalScore, setFinalScore] = useState(0)
   const [lives, setLives] = useState(3)
   const [combo, setCombo] = useState(1)
+  const [comboPulse, setComboPulse] = useState(false)
+  const [showBigCombo, setShowBigCombo] = useState(false)
   const [shieldActive, setShieldActive] = useState(false)
   const [shieldTime, setShieldTime] = useState(0)
   const [rapidFireActive, setRapidFireActive] = useState(false)
   const [rapidFireTime, setRapidFireTime] = useState(0)
+  const comboTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sceneRef = useRef<Scene | null>(null)
+
+  // notifications / toasts
+  const [notifications, setNotifications] = useState<Array<{ id: number; text: string }>>([])
+  const nextNotifId = useRef(1)
 
   const startGame = () => {
     setScore(0)
@@ -26,9 +34,20 @@ export function GameUI({ engine }: GameUIProps) {
     setGameState('playing')
 
     const scene = new Scene(engine)
+    sceneRef.current = scene
     scene.onScoreUpdate = (s) => setScore(s)
     scene.onLivesUpdate = (l) => setLives(l)
     scene.onComboUpdate = (c) => setCombo(c)
+    scene.onPowerUpCollected = (type) => {
+      // map type to friendly text
+      const label: Record<string, string> = {
+        health: '❤️ Health',
+        rapidfire: '⚡ Rapid Fire',
+        shield: '🛡️ Shield',
+        score: '⭐ Score Bonus'
+      }
+      addNotification(label[type] || `+ ${String(type)}`)
+    }
     scene.onShieldUpdate = (active, time) => {
       setShieldActive(active)
       setShieldTime(time)
@@ -49,6 +68,30 @@ export function GameUI({ engine }: GameUIProps) {
     if (!engine.scene) startGame()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // pulse animation when combo changes
+  useEffect(() => {
+    if (combo > 1) {
+      setComboPulse(true)
+      setShowBigCombo(true)
+      if (comboTimerRef.current) clearTimeout(comboTimerRef.current)
+      comboTimerRef.current = setTimeout(() => {
+        setComboPulse(false)
+        setShowBigCombo(false)
+        comboTimerRef.current = null
+      }, 700)
+    }
+    return () => { if (comboTimerRef.current) clearTimeout(comboTimerRef.current) }
+  }, [combo])
+
+  // Add notification helper
+  function addNotification(text: string, duration = 2500) {
+    const id = nextNotifId.current++
+    setNotifications((s) => [...s, { id, text }])
+    setTimeout(() => {
+      setNotifications((s) => s.filter(n => n.id !== id))
+    }, duration)
+  }
 
   // Update final score when game over
   useEffect(() => {
@@ -202,6 +245,39 @@ export function GameUI({ engine }: GameUIProps) {
   // Playing state - HUD
   return (
     <>
+      {/* Notifications (toasts) - top center */}
+      <div style={{ position: 'fixed', top: '16px', left: '50%', transform: 'translateX(-50%)', zIndex: 50 }}>
+        {notifications.map(n => (
+          <div key={n.id} style={{
+            background: 'rgba(0,0,0,0.7)',
+            color: 'white',
+            padding: '8px 14px',
+            marginBottom: '8px',
+            borderRadius: '8px',
+            boxShadow: '0 6px 20px rgba(0,0,0,0.5)',
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: '0.75rem',
+            opacity: 0.95
+          }}>{n.text}</div>
+        ))}
+      </div>
+
+      {/* Big centered combo when active */}
+      {showBigCombo && combo > 1 && (
+        <div style={{ position: 'fixed', left: '50%', top: '30%', transform: 'translate(-50%, -50%)', zIndex: 40, pointerEvents: 'none' }}>
+          <div style={{
+            fontFamily: '"Press Start 2P", monospace',
+            fontSize: '2.4rem',
+            color: '#ffec00',
+            textAlign: 'center',
+            textShadow: '0 0 20px #ffec00, 0 0 40px #ff6600',
+            transform: comboPulse ? 'scale(1.35)' : 'scale(1)',
+            transition: 'transform 0.12s ease-out'
+          }}>COMBO x{combo}</div>
+          <div style={{ textAlign: 'center', color: '#ffd700', fontFamily: '"Press Start 2P", monospace', marginTop: '6px' }}>+{Math.floor((combo - 1) * 50)}% BONUS</div>
+        </div>
+      )}
+
       {/* Score et Combo - En haut à gauche */}
       <div style={{
         position: 'fixed',
@@ -217,11 +293,17 @@ export function GameUI({ engine }: GameUIProps) {
         {combo > 1 && (
           <div style={{
             color: '#ffff00',
-            fontSize: '0.8rem',
+            fontSize: '1.1rem',
             marginTop: '5px',
-            animation: 'pulse 0.5s infinite'
+            transform: comboPulse ? 'scale(1.45)' : 'scale(1)',
+            transformOrigin: 'left top',
+            transition: 'transform 0.15s ease-out, text-shadow 0.15s ease-out',
+            textShadow: comboPulse ? '0 0 14px #ffff66, 0 0 30px #ffcc00' : '0 0 10px #ffff66'
           }}>
-            COMBO x{combo}
+            <div style={{ fontWeight: 'bold' }}>COMBO x{combo}</div>
+            <div style={{ fontSize: '0.7rem', color: '#ffd700', marginTop: '2px' }}>
+              BONUS +{Math.floor((combo - 1) * 50)}%
+            </div>
           </div>
         )}
       </div>

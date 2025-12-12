@@ -28,6 +28,8 @@ import { EngineTrail } from '../Class/EngineTrail'
 import { Stats } from './Stats'
 import { Debug } from './Debug'
 import { ParticleExplosion } from '../Class/ParticleExplosion'
+import { BuildingManager } from './BuildingManager'
+import { addScore, getMachineName } from './Highscores'
 
 type Disposable = { geometry?: { dispose(): void }, material?: { dispose(): void } }
 
@@ -67,9 +69,9 @@ export class Scene extends ThreeScene {
 
   // Système de combo
   combo = 1
-  maxCombo = 10
+  maxCombo = 20
   comboTimer = 0
-  comboDuration = 3
+  comboDuration = 6 // longer so combos stay visible
 
   // Système de tir rapide
   rapidFireActive = false
@@ -91,6 +93,7 @@ export class Scene extends ThreeScene {
   onGameOver?: () => void
   onLivesUpdate?: (lives: number) => void
   onComboUpdate?: (combo: number) => void
+  onPowerUpCollected?: (type: PowerUpType) => void
   onShieldUpdate?: (active: boolean, timeLeft: number) => void
   onRapidFireUpdate?: (active: boolean, timeLeft: number) => void
 
@@ -107,6 +110,9 @@ export class Scene extends ThreeScene {
   private worldObstacleSpacing = 30
   private worldObstacleAreaWidth = 20
   private worldObstacleScaleMultiplier = 2
+
+  private buildingManager?: BuildingManager
+  private ground?: Mesh
 
   constructor (engine: Engine) {
     super()
@@ -155,12 +161,19 @@ export class Scene extends ThreeScene {
 
   private generateWorld() {
     this.generateGround(this.worldGroundSize, this.worldGroundY)
-    this.generateObstacles({
-      count: this.worldObstacleCount,
-      spacing: this.worldObstacleSpacing,
-      areaWidth: this.worldObstacleAreaWidth,
-      scaleMultiplier: this.worldObstacleScaleMultiplier
+    // Utiliser BuildingManager pour un monde infini
+    // élargir la route (plus d'espace latéral) et plus de colonnes
+    const extendedAreaWidth = 60 // plus large pour permettre de se déplacer sans 'parois'
+    this.buildingManager = new BuildingManager(this, this.world, {
+      tileDepth: this.worldObstacleSpacing,
+      areaWidth: extendedAreaWidth,
+      rowsAhead: 120, // beaucoup plus loin pour donner l'impression d'infini
+      rowsBehind: 6,
+      texture: '/textures/building.jpg',
+      scaleMultiplier: this.worldObstacleScaleMultiplier,
+      cols: Math.max(5, Math.floor(extendedAreaWidth / 4))
     })
+    this.buildingManager.init()
   }
 
   private generateGround(size = 1200, y = -2) {
@@ -171,31 +184,8 @@ export class Scene extends ThreeScene {
     ground.position.y = y
     ground.receiveShadow = false
     ground.name = 'Ground'
+    this.ground = ground
     this.add(ground)
-  }
-
-  private generateObstacles(opts: { count?: number, spacing?: number, areaWidth?: number, scaleMultiplier?: number } = {}) {
-    const count = opts.count ?? 8
-    const spacing = opts.spacing ?? 30
-    const areaWidth = opts.areaWidth ?? 20
-    const scaleMultiplier = opts.scaleMultiplier ?? 2
-    const baseTexture = '/textures/building.jpg'
-
-    // start slightly ahead so first obstacles aren't on top of the ship
-    for (let i = 1; i <= count; i++) {
-      const x = (Math.random() - 0.5) * areaWidth
-      const z = -i * spacing - Math.random() * (spacing * 0.3)
-      const height = 6 + Math.random() * 10
-      const size = new Vector3(3 * scaleMultiplier, height * scaleMultiplier, 3 * scaleMultiplier)
-      const posY = this.worldGroundY + (size.y / 2)
-      try {
-        const obs = new Obstacle(this.world, new Vector3(x, posY, z), size, baseTexture)
-        this.obstacles.push(obs)
-        this.add(obs.mesh)
-      } catch (err) {
-        console.warn('Obstacle generation failed for index', i, err)
-      }
-    }
   }
 
   private setupLights() {
@@ -241,6 +231,14 @@ export class Scene extends ThreeScene {
     if (this.starship && !this.starship.destroyed) {
       this.starship.update(delta, input)
 
+      // recentre le sol sous le vaisseau pour qu'il ne disparaisse pas
+      try {
+        const shipPos = this.starship.getPosition()
+        if (this.ground) {
+          this.ground.position.z = shipPos.z
+        }
+      } catch (e) { /* ignore */ }
+
       // Update engine trail
       if (this.engineTrail) {
         const shipPos = this.starship.getPosition()
@@ -279,6 +277,13 @@ export class Scene extends ThreeScene {
 
       // Collision avec power-ups
       this.checkPowerUpCollisions()
+      // Update buildings (monde infini)
+      if (this.buildingManager && this.starship) {
+        this.buildingManager.update(this.starship.getPosition())
+        // Synchroniser la liste d'obstacles de la scène avec ce que le manager gère
+        // cela permet à l'UI / aux collisions existantes de continuer à fonctionner
+        this.obstacles = this.buildingManager.getActiveObstacles()
+      }
     }
 
     // lasers update + collisions
@@ -313,12 +318,19 @@ export class Scene extends ThreeScene {
     this.updateDifficulty(delta)
 
     // retirer obstacles trop loins
-    this.obstacles.forEach(obs => {
-      if (this.starship && obs.mesh.position.z > this.starship.getPosition().z + 20) {
-        try { obs.destroy(this.world) } catch (err) { console.warn('obs.destroy failed', err) }
-      }
-    })
-    this.obstacles = this.obstacles.filter(o => o.mesh.parent)
+    // Si nous utilisons BuildingManager, il s'occupe du pooling/destruction des obstacles.
+    // Ne pas détruire ici les obstacles managés. Par contre, si aucun manager, garder le comportement existant.
+    if (!this.buildingManager) {
+      this.obstacles.forEach(obs => {
+        if (this.starship && obs.mesh.position.z > this.starship.getPosition().z + 20) {
+          try { obs.destroy(this.world) } catch (err) { console.warn('obs.destroy failed', err) }
+        }
+      })
+      this.obstacles = this.obstacles.filter(o => o.mesh.parent)
+    } else {
+      // garder la référence aux obstacles fournie par le manager
+      this.obstacles = this.buildingManager.getActiveObstacles()
+    }
 
     if (this.debug.showHitboxes) {
       this.updateHitboxes()
@@ -410,7 +422,20 @@ export class Scene extends ThreeScene {
         }
       }
 
-      // Collision avec obstacles
+      // Collision avec obstacles (inclut BuildingManager actifs)
+      // obstacles managés
+      if (this.buildingManager) {
+        const mgrObs = this.buildingManager.getActiveObstacles()
+        for (const obs of mgrObs) {
+          try {
+            if (obs.mesh && obs.getAABB().intersectsBox(shipBox)) {
+              this.handleDamage()
+              return
+            }
+          } catch (err) { /* ignore */ }
+        }
+      }
+      // legacy obstacles array (if any)
       for (const obs of this.obstacles) {
         if (obs.mesh && obs.getAABB().intersectsBox(shipBox)) {
           this.handleDamage()
@@ -450,6 +475,8 @@ export class Scene extends ThreeScene {
   }
 
   private collectPowerUp(type: PowerUpType) {
+    // notify UI that a power-up was collected (for notifications)
+    try { if (this.onPowerUpCollected) this.onPowerUpCollected(type) } catch { }
     switch (type) {
       case 'health':
         if (this.lives < this.maxLives) {
@@ -556,11 +583,12 @@ export class Scene extends ThreeScene {
   private handleEnemyKill(position: Vector3, basePoints: number) {
     // Increase combo
     this.comboTimer = this.comboDuration
-    const points = basePoints * this.combo
+    // increase combo more visibly and give more points
+    this.combo = Math.min(this.maxCombo, this.combo + 1)
+    const points = Math.floor(basePoints * (1 + (this.combo - 1) * 0.5)) // each combo adds +50% points
     this.addScore(points)
 
     if (this.combo < this.maxCombo) {
-      this.combo++
       if (this.onComboUpdate) this.onComboUpdate(this.combo)
     }
 
@@ -693,12 +721,12 @@ export class Scene extends ThreeScene {
     this.difficultyTimer += delta
 
     // Increase difficulty every 30 seconds
-    const newLevel = Math.floor(this.difficultyTimer / 30) + 1
+    const newLevel = Math.floor(this.difficultyTimer / 20) + 1
     if (newLevel > this.difficultyLevel) {
       this.difficultyLevel = newLevel
 
       // Reduce spawn interval (more enemies)
-      this.spawnInterval = Math.max(0.8, 2 - this.difficultyLevel * 0.15)
+      this.spawnInterval = Math.max(0.4, 1.5 - this.difficultyLevel * 0.12)
 
       console.log(`🎮 Difficulté augmentée: niveau ${this.difficultyLevel}`)
     }
@@ -770,9 +798,10 @@ export class Scene extends ThreeScene {
 
   private spawnEnemy() {
     if (!this.starship) return
-    const x = (Math.random() - 0.5) * 20
+    // spawn plus loin devant et réparti sur la largeur étendue
+    const x = (Math.random() - 0.5) * 50
     const y = Math.random() * 8 + 2
-    const z = this.starship.getPosition().z - 50
+    const z = this.starship.getPosition().z - (60 + Math.random() * 120 + this.difficultyLevel * 5)
     // Speed increases with difficulty
     const speed = 8 + this.difficultyLevel * 1.5
     const enemy = new Enemy(this.world, new Vector3(x, y, z), speed)
@@ -782,9 +811,9 @@ export class Scene extends ThreeScene {
 
   private spawnEnemyShooter() {
     if (!this.starship) return
-    const x = (Math.random() - 0.5) * 18
+    const x = (Math.random() - 0.5) * 50
     const y = Math.random() * 6 + 3
-    const z = this.starship.getPosition().z - 55
+    const z = this.starship.getPosition().z - (70 + Math.random() * 140 + this.difficultyLevel * 6)
     const speed = 6 + this.difficultyLevel
     const shooter = new EnemyShooter(this.world, new Vector3(x, y, z), speed)
     this.enemyShooters.push(shooter)
@@ -850,6 +879,11 @@ export class Scene extends ThreeScene {
 
     this.gameOverPending = true
     this.gameOverPendingTimer = 0
+    // save highscore
+    try {
+      const name = getMachineName()
+      addScore(name, this.score).catch(() => { /* ignore */ })
+    } catch { }
   }
 
   dispose () {
