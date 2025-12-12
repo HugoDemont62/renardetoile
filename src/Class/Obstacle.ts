@@ -8,29 +8,23 @@ export class Obstacle {
 
   constructor (world: World, position: Vector3, size: Vector3, texturePath?: string) {
     const geom = new BoxGeometry(size.x, size.y, size.z)
-    this.size = size
 
-    // Material: si texturePath fourni on charge la texture, sinon fallback color
+    this.size = size
     let mat: MeshStandardMaterial
 
     if (texturePath) {
       const loader = new TextureLoader()
-      const tex = loader.load(
-        texturePath,
-        (t) => {
-          // Ajuste le wrapping et le repeat pour éviter l'étirement
-          t.wrapS = RepeatWrapping
-          t.wrapT = RepeatWrapping
-          // Répète la texture selon la taille (ajuste le divisor pour l'échelle désirée)
-          t.repeat.set(Math.max(1, size.x / 2), Math.max(1, size.y / 2))
-        },
-      )
-      mat = new MeshStandardMaterial({map: tex})
-      // Optionnel : améliorer l'apparence
+      const tex = loader.load(texturePath, (t) => {
+        // Ajuste le wrapping et le repeat pour éviter l'étirement
+        t.wrapS = RepeatWrapping
+        t.wrapT = RepeatWrapping
+        t.repeat.set(Math.max(1, size.x / 2), Math.max(1, size.y / 2))
+      })
+      mat = new MeshStandardMaterial({ map: tex })
       mat.roughness = 0.9
       mat.metalness = 0.0
     } else {
-      mat = new MeshStandardMaterial({color: 0x808080, roughness: 0.9})
+      mat = new MeshStandardMaterial({ color: 0x808080, roughness: 0.9 })
     }
 
     this.mesh = new Mesh(geom, mat)
@@ -39,11 +33,15 @@ export class Obstacle {
 
     // corps fixe
     this.body = world.createRigidBody(RigidBodyDesc.fixed())
-    this.body.setTranslation({x: position.x, y: position.y, z: position.z}, true)
+    this.body.setTranslation({ x: position.x, y: position.y, z: position.z }, true)
   }
 
   getAABB (): Box3 {
     return new Box3().setFromObject(this.mesh)
+  }
+
+  destroy (world: World) {
+    try { world.removeRigidBody(this.body) } catch { /* ignore */ }
   }
 
   // Réinitialise la position (réutilisation depuis un pool). Ne détruit pas le rigidbody.
@@ -61,10 +59,5 @@ export class Obstacle {
   deactivate () {
     if (this.mesh.parent) this.mesh.parent.remove(this.mesh)
     this.mesh.visible = false
-  }
-
-  destroy (world: World) {
-    try { world.removeRigidBody(this.body) } catch { /* empty */ }
-    if (this.mesh.parent) this.mesh.parent.remove(this.mesh)
   }
 }

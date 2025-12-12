@@ -106,9 +106,7 @@ export class Scene extends ThreeScene {
   // génération du monde : paramètres configurables
   private worldGroundY = -2
   private worldGroundSize = 1200
-  private worldObstacleCount = 8
   private worldObstacleSpacing = 30
-  private worldObstacleAreaWidth = 20
   private worldObstacleScaleMultiplier = 2
 
   private buildingManager?: BuildingManager
