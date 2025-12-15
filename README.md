@@ -1,73 +1,72 @@
-# React + TypeScript + Vite
+# RenardÉtoile — Shoot'em up Web (React + TypeScript + Vite)
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+RenardÉtoile est un petit shoot'em up développé en TypeScript avec React et Vite. Le projet contient le moteur de jeu, les classes d'entités (vaisseau, ennemis, lasers), des assets (modèles, textures, sons) et une interface minimale pour jouer.
 
-Currently, two official plugins are available:
+## Principales fonctionnalités
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- Moteur de jeu en TypeScript (classe `Engine`, gestion de la scène et des objets).
+- Entités : `Starship`, `Enemy`, `Laser`, `PowerUp`, etc.
+- Assets 3D et textures dans `public/` et `src/assets/`.
+- Interface utilisateur légère dans `src/components/GameUI.tsx`.
 
-## React Compiler
+## Prérequis
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Node.js (>= 16 recommandé)
+- npm ou yarn
 
-## Expanding the ESLint configuration
+## Installation
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+Ouvrez un terminal à la racine du projet et lancez :
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm install
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+## Développement
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+Lancer le serveur de développement (Vite) :
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+```bash
+npm run dev
 ```
+
+## Construction pour production
+
+```bash
+npm run build
+npm run preview
+```
+
+## Structure utile du dépôt
+
+- `src/` : code source TypeScript et React
+  - `Class/` : classes de jeu (vaisseaux, ennemis, projectiles...)
+  - `components/` : composants React (UI)
+  - `lib/` : moteur, contrôles, utilitaires
+  - `assets/` : images et icônes du projet
+- `public/` : modèles 3D, textures et sons statiques
+- `index.html`, `vite.config.ts` : configuration Vite
+
+## Comment jouer
+
+- Ouvrez le serveur de dev (ou la build preview) dans votre navigateur.
+- Contrôles : les touches sont définies dans `src/lib/Controls.ts` (clavier / souris).
+- Objectif : survivre et obtenir le meilleur score possible.
+
+## Contribuer
+
+- Forkez le dépôt, créez une branche pour chaque fonctionnalité ou correction.
+- Respectez la structure existante et ajoutez des tests ou des exemples si pertinent.
+- Ouvrez une Pull Request détaillée décrivant les changements.
+
+## Licence
+
+Ce projet est distribué sous la licence MIT. Voir le fichier `LICENSE` à la racine du dépôt.
+
+## Auteur
+
+Prénom / pseudo : demonthu (inféré depuis l'environnement de travail)
+
+---
+
+Si vous voulez un README plus détaillé (guide de contribution, architecture interne, diagrammes, ou captures d'écran), dites-moi ce que vous souhaitez ajouter et je le ferai.
