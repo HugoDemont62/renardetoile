@@ -235,7 +235,7 @@ export class Scene extends ThreeScene {
         if (this.ground) {
           this.ground.position.z = shipPos.z
         }
-      } catch (e) { /* ignore */ }
+      } catch (err) { console.warn('Failed to recenter ground under ship', err) }
 
       // Update engine trail
       if (this.engineTrail) {
@@ -430,7 +430,7 @@ export class Scene extends ThreeScene {
               this.handleDamage()
               return
             }
-          } catch (err) { /* ignore */ }
+          } catch (err) { console.warn('Obstacle collision check failed', err) }
         }
       }
       // legacy obstacles array (if any)
@@ -445,7 +445,7 @@ export class Scene extends ThreeScene {
       for (const laser of this.enemyLasers) {
         if (laser.getAABB().intersectsBox(shipBox)) {
           this.handleDamage()
-          try { laser.destroy(this.world) } catch { /* ignore */ }
+          try { laser.destroy(this.world) } catch (err) { console.warn('enemy laser destroy failed', err) }
           this.enemyLasers = this.enemyLasers.filter(l => l !== laser)
           return
         }
@@ -474,7 +474,7 @@ export class Scene extends ThreeScene {
 
   private collectPowerUp(type: PowerUpType) {
     // notify UI that a power-up was collected (for notifications)
-    try { if (this.onPowerUpCollected) this.onPowerUpCollected(type) } catch { }
+    try { if (this.onPowerUpCollected) this.onPowerUpCollected(type) } catch (err) { console.warn('onPowerUpCollected handler failed', err) }
     switch (type) {
       case 'health':
         if (this.lives < this.maxLives) {
@@ -509,7 +509,7 @@ export class Scene extends ThreeScene {
         try {
           const ex = new ParticleExplosion(this, this.starship.getPosition(), 1)
           this.explosions.push(ex)
-        } catch { /* ignore */ }
+        } catch (err) { console.warn('ParticleExplosion creation failed', err) }
       }
       return
     }
@@ -534,7 +534,9 @@ export class Scene extends ThreeScene {
           s.volume = 0.5
           s.play().catch(() => { /* ignore */ })
         }
-      } catch { /* ignore */ }
+      } catch (err) {
+        console.warn('Error playing damage sound', err)
+      }
     }
   }
 
@@ -605,14 +607,16 @@ export class Scene extends ThreeScene {
         const s = this.enemyDeathSound.cloneNode(true) as HTMLAudioElement
         s.play().catch(() => { /* ignore */ })
       }
-    } catch { /* ignore */ }
+    } catch (err) {
+      console.warn('Error playing enemy death sound', err)
+    }
   }
 
   private updateEnemyLasers(delta: number) {
     this.enemyLasers = this.enemyLasers.filter(laser => {
       const alive = laser.update(delta)
       if (!alive) {
-        try { laser.destroy(this.world) } catch { /* ignore */ }
+        try { laser.destroy(this.world) } catch (err) { console.warn('enemy laser destroy failed', err) }
         return false
       }
       return true
@@ -625,7 +629,7 @@ export class Scene extends ThreeScene {
         try {
           enemy.update(delta, this.starship?.getPosition())
         } catch (err) {
-          console.warn('Enemy update failed', err)
+          console.warn('Failed to update enemy', err)
         }
       }
     }
@@ -669,7 +673,7 @@ export class Scene extends ThreeScene {
     // Cleanup destroyed shooters
     this.enemyShooters = this.enemyShooters.filter(s => {
       if (s.destroyed) {
-        try { s.destroy(this.world) } catch { /* ignore */ }
+        try { s.destroy(this.world) } catch (err) { console.warn('enemyShooter.destroy failed during dispose', err) }
         return false
       }
       return true
@@ -771,7 +775,8 @@ export class Scene extends ThreeScene {
     if (!this.starship) return
     const pos = this.starship.getPosition()
     pos.z -= 2
-    const dir = this.starship.getForward()
+    // calculer la direction depuis la direction du vaisseau (où il pointe)
+    const dir = this.starship.getForward().clone().normalize()
     const laser = new Laser(this.world, pos, dir, 40)
     this.lasers.push(laser)
     this.add(laser.mesh)
@@ -881,7 +886,9 @@ export class Scene extends ThreeScene {
     try {
       const name = getMachineName()
       addScore(name, this.score).catch(() => { /* ignore */ })
-    } catch { }
+    } catch (err) {
+      console.warn('Failed to save highscore', err)
+    }
   }
 
   dispose () {
@@ -933,3 +940,4 @@ export class Scene extends ThreeScene {
     }
   }
 }
+
