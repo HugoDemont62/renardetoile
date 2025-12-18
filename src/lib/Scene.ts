@@ -171,7 +171,6 @@ export class Scene extends ThreeScene {
       scaleMultiplier: this.worldObstacleScaleMultiplier,
       cols: Math.max(5, Math.floor(extendedAreaWidth / 4))
     })
-    this.buildingManager.init()
   }
 
   private generateGround(size = 1200, y = -2) {

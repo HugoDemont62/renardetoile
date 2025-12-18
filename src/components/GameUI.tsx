@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Engine } from '../lib/Engine'
 import { Scene } from '../lib/Scene'
-import { Vector3 } from 'three'
 
 interface GameUIProps {
   engine: Engine
