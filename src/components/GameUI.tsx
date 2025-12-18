@@ -55,7 +55,7 @@ export function GameUI({ engine }: GameUIProps) {
           const ndc = target.clone().project(s.camera)
 
           // récupérer la taille et la position du canvas (CSS pixels)
-          const canvas = (engine && (engine as any).renderer && (engine as any).renderer.domElement) as HTMLCanvasElement | undefined
+          const canvas = (engine?.renderer?.domElement) as HTMLCanvasElement | undefined
           let rectLeft = 0
           let rectTop = 0
           let vw = (globalThis.innerWidth || window.innerWidth)
