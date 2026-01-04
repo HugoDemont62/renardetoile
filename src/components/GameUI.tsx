@@ -25,6 +25,89 @@ export function GameUI({ engine }: GameUIProps) {
   const [notifications, setNotifications] = useState<Array<{ id: number; text: string }>>([])
   const nextNotifId = useRef(1)
 
+  // Crosshair position (screen coords). It will be computed from the starship forward vector
+  const [crosshairPos, setCrosshairPos] = useState<{ x: number; y: number } | null>(null)
+  const [crosshairColor, setCrosshairColor] = useState<string>('rgba(255,0,0,0.95)')
+
+  // Update crosshair each frame so it points where the ship is aiming.
+  // We project a world-space point (ship position + forward * distance) into screen space.
+  useEffect(() => {
+    let mounted = true
+    let raf = 0
+
+    const update = () => {
+      if (!mounted) return
+      const s: Scene | undefined = sceneRef.current ?? engine.scene
+      if (s && s.starship && s.camera) {
+        try {
+          // Reproduire la position de spawn (z - 2) puis projeter un point loin devant pour visualiser la direction
+          const shipPos = s.starship.getPosition()
+          // utiliser la même direction que dans Scene.shoot() (direction du vaisseau)
+          const forward = s.starship.getForward().clone().normalize()
+          const spawnPos = shipPos.clone()
+          spawnPos.z -= 2
+          // distance choisie pour représenter la zone où les lasers passent (≈ portée visible)
+          const target = spawnPos.clone().add(forward.clone().multiplyScalar(40))
+
+          // s'assurer que la caméra a ses matrices à jour avant la projection
+          s.camera.updateMatrixWorld(true)
+          // projection en NDC via la caméra
+          const ndc = target.clone().project(s.camera)
+
+          // récupérer la taille et la position du canvas (CSS pixels)
+          const canvas = (engine?.renderer?.domElement) as HTMLCanvasElement | undefined
+          let rectLeft = 0
+          let rectTop = 0
+          let vw = (globalThis.innerWidth || window.innerWidth)
+          let vh = (globalThis.innerHeight || window.innerHeight)
+          if (canvas) {
+            const rect = canvas.getBoundingClientRect()
+            if (rect.width > 0 && rect.height > 0) {
+              vw = rect.width
+              vh = rect.height
+              rectLeft = rect.left
+              rectTop = rect.top
+            }
+          }
+
+          // detecter hors-écran
+          const offscreen = ndc.x < -1 || ndc.x > 1 || ndc.y < -1 || ndc.y > 1 || ndc.z > 1
+
+          // Convertir NDC -> coordonnées CSS du canvas
+          let x = (ndc.x + 1) * 0.5 * vw + rectLeft
+          let y = (1 - (ndc.y + 1) * 0.5) * vh + rectTop
+
+          // clamp pour rester visible
+          const margin = 8
+          const minX = rectLeft + margin
+          const maxX = rectLeft + vw - margin
+          const minY = rectTop + margin
+          const maxY = rectTop + vh - margin
+          x = Math.max(minX, Math.min(x, maxX))
+          y = Math.max(minY, Math.min(y, maxY))
+
+          setCrosshairPos({ x: Math.round(x), y: Math.round(y) })
+          setCrosshairColor(offscreen ? 'rgba(255,200,0,0.95)' : 'rgba(255,0,0,0.95)')
+        } catch (err) {
+          console.warn('Crosshair projection failed', err)
+          setCrosshairPos({ x: Math.round((globalThis.innerWidth || window.innerWidth) / 2), y: Math.round((globalThis.innerHeight || window.innerHeight) / 2) })
+          setCrosshairColor('rgba(255,0,0,0.95)')
+        }
+      } else {
+        // default center until scene/ship ready
+        setCrosshairPos({ x: Math.round((globalThis.innerWidth || window.innerWidth) / 2), y: Math.round((globalThis.innerHeight || window.innerHeight) / 2) })
+        setCrosshairColor('rgba(255,0,0,0.95)')
+      }
+      raf = requestAnimationFrame(update)
+    }
+
+    raf = requestAnimationFrame(update)
+    return () => {
+      mounted = false
+      cancelAnimationFrame(raf)
+    }
+  }, [engine])
+
   const startGame = () => {
     setScore(0)
     setLives(3)
@@ -374,6 +457,30 @@ export function GameUI({ engine }: GameUIProps) {
       }}>
         ZQSD: Bouger | E: Tirer | Espace: Accélérer
       </div>
+
+      {/* Crosshair - indique la direction de tir (point devant le vaisseau projeté à l'écran) */}
+      {crosshairPos && (
+        <div style={{
+          position: 'fixed',
+          left: crosshairPos.x,
+          top: crosshairPos.y,
+          transform: 'translate(-50%, -50%)',
+          width: '40px',
+          height: '40px',
+          pointerEvents: 'none',
+          zIndex: 60,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center'
+        }}>
+          {/* vertical line */}
+          <div style={{ position: 'absolute', width: '2px', height: '28px', background: 'rgba(255,255,255,0.9)', boxShadow: '0 0 8px rgba(255,255,255,0.15)' }} />
+          {/* horizontal line */}
+          <div style={{ position: 'absolute', height: '2px', width: '28px', background: 'rgba(255,255,255,0.9)', boxShadow: '0 0 8px rgba(255,255,255,0.15)' }} />
+          {/* center ring (couleur dynamique) */}
+          <div style={{ position: 'absolute', width: '10px', height: '10px', borderRadius: '50%', border: `2px solid ${crosshairColor}`, boxSizing: 'border-box', background: 'transparent', boxShadow: `0 0 10px ${crosshairColor}` }} />
+        </div>
+      )}
 
       {/* Style pour l'animation pulse */}
       <style>{`

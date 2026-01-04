@@ -1,4 +1,4 @@
-import { Clock, WebGLRenderer } from 'three'
+import { Clock, WebGLRenderer, Scene as ThreeScene, PerspectiveCamera } from 'three'
 import type { Scene } from './Scene'
 import { PostProcessing } from './PostProcessing'
 
@@ -19,8 +19,8 @@ export class Engine {
 
     globalThis.addEventListener('resize', this.resize)
 
-    // initialiser postprocessing (pixelSize par défaut = 6)
-    this.post = new PostProcessing(this.renderer, 6)
+    // initialiser postprocessing (pixelSize par défaut réduit)
+    this.post = new PostProcessing(this.renderer)
   }
 
   setScene(S: new (engine: Engine) => Scene) {
@@ -44,7 +44,7 @@ export class Engine {
   }
 
   // méthode pour que la Scene demande le rendu — utilise composer si présent
-  render(scene: any, camera: any) {
+  render(scene: ThreeScene, camera: PerspectiveCamera) {
     if (this.post) {
       this.post.render(scene, camera)
     } else {

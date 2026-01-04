@@ -20,9 +20,9 @@ export class PostProcessing {
   private quadCamera: OrthographicCamera
   private quad: Mesh
   private resolution = new Vector2(1, 1)
-  private pixelSize = 6
+  private pixelSize = 3
 
-  constructor(renderer: WebGLRenderer, pixelSize = 6) {
+  constructor(renderer: WebGLRenderer, pixelSize = 3) {
     this.renderer = renderer
     this.pixelSize = pixelSize
 
