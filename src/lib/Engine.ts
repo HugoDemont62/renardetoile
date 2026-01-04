@@ -13,7 +13,7 @@ export class Engine {
     parent?.append(this.renderer.domElement)
     this.clock = new Clock()
 
-    this.renderer.domElement.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: block; z-index: -1;`
+    this.renderer.domElement.style.cssText = `position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: block; z-index: -1; touch-action: none;`
 
     this.renderer.setAnimationLoop(this.update.bind(this))
 

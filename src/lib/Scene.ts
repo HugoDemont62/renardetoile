@@ -125,7 +125,8 @@ export class Scene extends ThreeScene {
 
     this.world = new World({ x: 0.0, y: 0.0, z: 0.0 })
 
-    this.controls = new Controls()
+    // Attacher les événements de contrôle au canvas WebGL pour un meilleur support tactile
+    this.controls = new Controls(this.engine.renderer.domElement)
     this.stats = new Stats()
     this.debug = new Debug()
 

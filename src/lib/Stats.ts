@@ -8,7 +8,15 @@ export class Stats {
   private lastTime = performance.now()
   private fps = 0
 
+  private visible = true
+
   constructor() {
+    // Ne pas afficher les stats automatiquement sur mobile/tactile ou écrans étroits
+    const isTouchDevice = (typeof navigator !== 'undefined' && ('maxTouchPoints' in navigator && (navigator as any).maxTouchPoints > 0)) || (typeof window !== 'undefined' && 'ontouchstart' in window) || (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
+    const smallScreen = typeof window !== 'undefined' && (window.innerWidth < 900)
+
+    this.visible = !(isTouchDevice || smallScreen)
+
     this.container = document.createElement('div')
     this.container.style.cssText = `
       position: fixed;
@@ -32,10 +40,14 @@ export class Stats {
     this.container.appendChild(this.entityDisplay)
     this.container.appendChild(this.positionDisplay)
 
-    document.body.appendChild(this.container)
+    if (this.visible) {
+      document.body.appendChild(this.container)
+    }
   }
 
   update(entities: { lasers: number; enemies: number; obstacles: number }, position?: { x: number; y: number; z: number }) {
+    if (!this.visible) return
+
     this.frames++
     const currentTime = performance.now()
 
@@ -62,14 +74,18 @@ export class Stats {
   }
 
   show() {
-    this.container.style.display = 'block'
+    if (this.visible) return
+    this.visible = true
+    if (!this.container.parentElement) document.body.appendChild(this.container)
   }
 
   hide() {
-    this.container.style.display = 'none'
+    if (!this.visible) return
+    this.visible = false
+    if (this.container.parentElement) document.body.removeChild(this.container)
   }
 
   dispose() {
-    document.body.removeChild(this.container)
+    if (this.container.parentElement) document.body.removeChild(this.container)
   }
 }
